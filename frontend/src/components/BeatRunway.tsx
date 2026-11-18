@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Volume2, VolumeX } from 'lucide-react';
+import { playMetronomeTick } from '../lib/chordVoicings';
 import type { GuitarTransformSettings } from '../lib/musicTransposer';
 import { transformChord } from '../lib/musicTransposer';
 import type { ChordEvent } from '../types/music';
@@ -9,6 +11,7 @@ interface BeatRunwayProps {
   beatsMs: number[];
   events: ChordEvent[];
   settings: GuitarTransformSettings;
+  isPlaying?: boolean;
   onSeekMs: (ms: number) => void;
 }
 
@@ -23,10 +26,13 @@ export const BeatRunway: React.FC<BeatRunwayProps> = ({
   beatsMs,
   events,
   settings,
+  isPlaying = false,
   onSeekMs,
 }) => {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [trackWidthPx, setTrackWidthPx] = useState<number>(640);
+  const [clickEnabled, setClickEnabled] = useState<boolean>(false);
+  const lastBeatIdxRef = useRef<number | null>(null);
 
   useEffect(() => {
     const el = trackRef.current;
@@ -42,10 +48,11 @@ export const BeatRunway: React.FC<BeatRunwayProps> = ({
     }
   }, []);
 
-  const beatInBar = useMemo(() => {
+  const { beatIdx, beatInBar } = useMemo(() => {
     if (!beatsMs.length) {
       const beatDur = 60000 / Math.max(60, bpm || 120);
-      return (Math.floor(currentTimeMs / beatDur) % 4) + 1;
+      const idx = Math.floor(Math.max(0, currentTimeMs) / beatDur);
+      return { beatIdx: idx, beatInBar: (idx % 4) + 1 };
     }
     let lo = 0;
     let hi = beatsMs.length - 1;
@@ -59,8 +66,19 @@ export const BeatRunway: React.FC<BeatRunwayProps> = ({
         hi = mid - 1;
       }
     }
-    return (idx % 4) + 1;
+    return { beatIdx: idx, beatInBar: (idx % 4) + 1 };
   }, [beatsMs, bpm, currentTimeMs]);
+
+  useEffect(() => {
+    if (!clickEnabled || !isPlaying) {
+      lastBeatIdxRef.current = beatIdx;
+      return;
+    }
+    if (lastBeatIdxRef.current !== null && beatIdx !== lastBeatIdxRef.current) {
+      playMetronomeTick(beatInBar === 1);
+    }
+    lastBeatIdxRef.current = beatIdx;
+  }, [beatIdx, beatInBar, clickEnabled, isPlaying]);
 
   const visibleEvents = useMemo(() => {
     const startWin = currentTimeMs - PAST_WINDOW_MS;
@@ -71,6 +89,16 @@ export const BeatRunway: React.FC<BeatRunwayProps> = ({
   return (
     <div className="beat-runway-bar" aria-label="Beat pulse and upcoming chord runway">
       <div className="metronome-cluster" title={`${bpm || 120} BPM`}>
+        <button
+          type="button"
+          className={`metronome-click-btn ${clickEnabled ? 'active' : ''}`}
+          aria-label="Toggle audible metronome click"
+          aria-pressed={clickEnabled}
+          title={clickEnabled ? 'Mute beat metronome click' : 'Enable audible beat metronome click'}
+          onClick={() => setClickEnabled((prev) => !prev)}
+        >
+          {clickEnabled ? <Volume2 size={12} /> : <VolumeX size={12} />}
+        </button>
         <span className="bpm-readout">{Math.round(bpm || 120)} BPM</span>
         <div className="beat-dots">
           {[1, 2, 3, 4].map((b) => (
@@ -104,8 +132,8 @@ export const BeatRunway: React.FC<BeatRunwayProps> = ({
           const pillWidthPx = Math.max(0, (widthPct / 100) * trackWidthPx - 3);
           const playheadOffsetPx = (playheadOffsetPct / 100) * trackWidthPx;
           const availableTextPx =
-            playheadOffsetPct > 0 ? pillWidthPx - playheadOffsetPx - 12 : pillWidthPx - 10;
-          const minNeededPx = Math.max(10, tx.label.length * 6.8);
+            playheadOffsetPct > 0 ? pillWidthPx - playheadOffsetPx - 14 : pillWidthPx - 12;
+          const minNeededPx = Math.max(12, tx.label.length * 7.8 + 4);
           const hideLabel = availableTextPx < minNeededPx;
 
           return (

@@ -10,8 +10,8 @@ A YouTube-powered Guitar Karaoke web app combining **Ultimate Guitar**-style cho
   1. **Fast Preview (~1.5s):** Tuning-compensated `librosa` 144-bin CQT Chroma + Viterbi HMM + BPM beat tracker.
   2. **Neural HD Upgrade (~3s):** **ChordMini PyTorch BTC** 170-chord Bi-Directional Transformer (`maj7`, `m7`, `7`, `sus4`, `sus2`, `dim7`, `m7b5`, `aug`, `6`).
 - **Smart Capo Optimizer & Beginner Simplify:** Scores Capo frets `0–7` for open guitar chord ergonomics, with instant `0ms` client-side Capo, Transpose, and Simplify toggles.
-- **Interactive SVG Guitar Fretboards + WebAudio Strummer:** Live "Playing Now" & "Up Next" diagrams, multiple neck voicings (open + E/A barre shapes), Left-Handed fretboard mirror (`Lefty`), and a native `popover` Song Chord Dictionary.
-- **Practice Transport:** A–B section looping, `0.5x–1.25x` pitch-preserved speed trainer, `±250ms` lyric sync nudges (`[` / `]`), Tap-1st-Word sync, and automatic local MP3 Range-streaming fallback if YouTube restricts iframe embedding.
+- **Interactive SVG Guitar Fretboards, Ear Tuner & WebAudio Strummer:** Live "Playing Now" & "Up Next" diagrams, multiple neck voicings (open + E/A barre shapes), Left-Handed fretboard mirror (`Lefty`), Capo-aware `E A D G B e` Ear Tuner, and a native `popover` Song Chord Dictionary.
+- **Practice Transport & Shareable Song Links:** A–B section looping, `0.5x–1.25x` pitch-preserved speed trainer, optional audible beat-synced metronome click, `±250ms` lyric sync nudges (`[` / `]`), Tap-1st-Word sync, shareable `/song/<videoId>` deep-links, and automatic local MP3 Range-streaming fallback if YouTube restricts iframe embedding.
 
 ## Quick Start (Local Development)
 

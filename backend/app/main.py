@@ -167,6 +167,12 @@ async def stream_song_session(
                         cur_dur = cur_dur or meta.durationSec
                         cur_thumb = _sanitize_thumbnail_url(meta.thumbnailUrl, video_id)
                         trusted_artist = True
+                    elif not cached:
+                        yield _sse_event(
+                            "error",
+                            {"message": "Video unavailable or could not be found on YouTube."},
+                        )
+                        return
 
                 clean_t, clean_a = clean_track_metadata(
                     cur_title, cur_artist, trusted_artist=trusted_artist

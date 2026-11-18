@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight, Grid2X2, Volume2 } from 'lucide-react';
-import { getGuitarVoicings, strumGuitarVoicing } from '../lib/chordVoicings';
+import {
+  getGuitarVoicings,
+  playReferenceString,
+  strumGuitarVoicing,
+} from '../lib/chordVoicings';
 import type { GuitarTransformSettings } from '../lib/musicTransposer';
 import { transformChord } from '../lib/musicTransposer';
 import type { ChordEvent, GuitarVoicing } from '../types/music';
@@ -103,8 +107,8 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
             y1={padTop + fi * fretStep}
             x2={padLeft + gridW}
             y2={padTop + fi * fretStep}
-            stroke="rgba(148, 163, 184, 0.28)"
-            strokeWidth={1.2}
+            stroke="var(--fret-wire)"
+            strokeWidth={1}
           />
         ))}
 
@@ -118,8 +122,8 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
                 y1={padTop}
                 x2={cx}
                 y2={padTop + gridH}
-                stroke="rgba(226, 232, 240, 0.52)"
-                strokeWidth={2.2 - origSi * 0.24}
+                stroke="var(--fret-string)"
+                strokeWidth={1.8 - origSi * 0.18}
               />
               <text
                 x={cx}
@@ -146,10 +150,10 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
               y1={cy}
               x2={x2}
               y2={cy}
-              stroke={highlight ? '#f59e0b' : '#38bdf8'}
+              stroke={highlight ? 'var(--fret-dot-primary)' : 'var(--fret-dot-secondary)'}
               strokeWidth={compact ? 10 : 12}
               strokeLinecap="round"
-              opacity={0.9}
+              opacity={0.94}
             />
           );
         })}
@@ -171,8 +175,8 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
                 cy={padTop - 12}
                 r={4.2}
                 fill="none"
-                stroke="#94a3b8"
-                strokeWidth={1.6}
+                stroke="var(--muted)"
+                strokeWidth={1.5}
               />
             );
           }
@@ -187,7 +191,7 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
                 cx={cx}
                 cy={cy}
                 r={compact ? 7 : 8.5}
-                fill={highlight ? '#f59e0b' : '#38bdf8'}
+                fill={highlight ? 'var(--fret-dot-primary)' : 'var(--fret-dot-secondary)'}
               />
               {finger > 0 && (
                 <text x={cx} y={cy + 3.4} textAnchor="middle" className="finger-num-text">
@@ -343,6 +347,27 @@ export const FretboardDeck: React.FC<FretboardDeckProps> = ({
             Close
           </button>
         </div>
+
+        <div className="popover-tuner-bar" role="group" aria-label="Reference guitar ear tuner">
+          <span className="tuner-label">
+            Ear Tuner {settings.capo > 0 ? `(w/ Capo ${settings.capo})` : '(Standard)'}
+          </span>
+          <div className="tuner-strings">
+            {STRING_NAMES.map((name, si) => (
+              <button
+                key={`${name}-${si}`}
+                type="button"
+                className="tuner-string-btn"
+                title={`Pluck ${name} string reference tone`}
+                onClick={() => playReferenceString(si, settings.capo)}
+              >
+                <Volume2 size={11} />
+                <span>{name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="popover-chord-grid">
           {uniqueChordItems.map((item) => {
             const v = getGuitarVoicings(item.rootPc, item.quality)[0];

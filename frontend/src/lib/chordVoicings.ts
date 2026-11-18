@@ -265,9 +265,9 @@ export function getGuitarVoicings(rootPc: number, quality: string): GuitarVoicin
 }
 
 let sharedAudioCtx: AudioContext | null = null;
-const OPEN_STRING_MIDI = [40, 45, 50, 55, 59, 64];
+export const OPEN_STRING_MIDI = [40, 45, 50, 55, 59, 64];
 
-export function strumGuitarVoicing(voicing: GuitarVoicing, capoFret = 0): void {
+function ensureAudioContext(): AudioContext | null {
   try {
     if (!sharedAudioCtx) {
       sharedAudioCtx = new AudioContext();
@@ -275,7 +275,16 @@ export function strumGuitarVoicing(voicing: GuitarVoicing, capoFret = 0): void {
     if (sharedAudioCtx.state === 'suspended') {
       void sharedAudioCtx.resume();
     }
-    const ctx = sharedAudioCtx;
+    return sharedAudioCtx;
+  } catch {
+    return null;
+  }
+}
+
+export function strumGuitarVoicing(voicing: GuitarVoicing, capoFret = 0): void {
+  try {
+    const ctx = ensureAudioContext();
+    if (!ctx) return;
     const now = ctx.currentTime;
 
     let strumIdx = 0;
@@ -316,5 +325,70 @@ export function strumGuitarVoicing(voicing: GuitarVoicing, capoFret = 0): void {
     });
   } catch {
     // Ignore WebAudio autoplay restrictions if triggered without gesture
+  }
+}
+
+export function playReferenceString(stringIndex: number, capoFret = 0): void {
+  try {
+    const ctx = ensureAudioContext();
+    if (!ctx || stringIndex < 0 || stringIndex >= OPEN_STRING_MIDI.length) return;
+    const now = ctx.currentTime;
+    const midi = OPEN_STRING_MIDI[stringIndex] + capoFret;
+    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(freq, now);
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(freq, now);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(freq * 4.0, now);
+    filter.frequency.exponentialRampToValueAtTime(freq * 1.25, now + 2.4);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.18, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 2.75);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 2.8);
+    osc2.stop(now + 2.8);
+  } catch {
+    // Ignore WebAudio restrictions
+  }
+}
+
+export function playMetronomeTick(isDownbeat: boolean): void {
+  try {
+    const ctx = ensureAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(isDownbeat ? 1120 : 780, now);
+    osc.frequency.exponentialRampToValueAtTime(isDownbeat ? 680 : 480, now + 0.032);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(isDownbeat ? 0.095 : 0.055, now + 0.003);
+    gain.gain.exponentialRampToValueAtTime(0.0005, now + 0.038);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.042);
+  } catch {
+    // Ignore WebAudio restrictions
   }
 }

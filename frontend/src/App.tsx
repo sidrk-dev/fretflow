@@ -10,6 +10,27 @@ import { useSongSession } from './hooks/useSongSession';
 import { transformChord, type GuitarTransformSettings } from './lib/musicTransposer';
 import type { SearchResultItem, SongSection } from './types/music';
 
+const SONG_PATH_RE = /^\/song\/([A-Za-z0-9_-]{11})\/?$/;
+
+function parseSongIdFromPath(pathname: string): string | null {
+  const m = SONG_PATH_RE.exec(pathname);
+  return m ? m[1] : null;
+}
+
+function makeDeepLinkItem(videoId: string): SearchResultItem {
+  return {
+    videoId,
+    title: '',
+    artist: '',
+    album: '',
+    durationSec: 0,
+    durationText: '',
+    thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+    resultType: 'video',
+    viewsText: '',
+  };
+}
+
 export const App: React.FC = () => {
   const { session, stage, error, loadSong, resetSession, updateManualOffset } = useSongSession();
   const [loopRange, setLoopRange] = useState<LoopRange | null>(null);
@@ -33,6 +54,26 @@ export const App: React.FC = () => {
     }
   }, [session?.videoId, session?.chords]);
 
+  // Honor shareable `/song/<videoId>` deep-links on initial load and browser Back/Forward
+  useEffect(() => {
+    const initialVid = parseSongIdFromPath(window.location.pathname);
+    if (initialVid) {
+      loadSong(makeDeepLinkItem(initialVid));
+    }
+    const onPopState = () => {
+      const nextVid = parseSongIdFromPath(window.location.pathname);
+      setLoopRange(null);
+      appliedCapoVideoRef.current = null;
+      if (nextVid) {
+        loadSong(makeDeepLinkItem(nextVid));
+      } else {
+        resetSession();
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [loadSong, resetSession]);
+
   const {
     ytContainerRef,
     audioRef,
@@ -55,12 +96,19 @@ export const App: React.FC = () => {
   const handleSelectSong = (item: SearchResultItem) => {
     setLoopRange(null);
     appliedCapoVideoRef.current = null;
+    const targetPath = `/song/${item.videoId}`;
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({ videoId: item.videoId }, '', targetPath);
+    }
     loadSong(item);
   };
 
   const handleGoHome = () => {
     setLoopRange(null);
     appliedCapoVideoRef.current = null;
+    if (window.location.pathname !== '/') {
+      window.history.pushState({}, '', '/');
+    }
     resetSession();
   };
 
@@ -172,6 +220,7 @@ export const App: React.FC = () => {
                   beatsMs={session.chords?.beatsMs ?? []}
                   events={session.chords?.events ?? []}
                   settings={settings}
+                  isPlaying={isPlaying}
                   onSeekMs={seekToMs}
                 />
               </>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownCircle, Guitar, Music2, Play, Repeat } from 'lucide-react';
+import { ArrowDownCircle, Music2, Repeat } from 'lucide-react';
 import type { LoopRange } from '../hooks/usePlaybackClock';
 import { getGuitarVoicings, strumGuitarVoicing } from '../lib/chordVoicings';
 import type { GuitarTransformSettings } from '../lib/musicTransposer';
@@ -243,44 +243,35 @@ export const KaraokeStage: React.FC<KaraokeStageProps> = ({
       <div className="karaoke-stage welcome-stage">
         <div className="welcome-inner">
           <div className="welcome-hero">
-            <div className="welcome-badge">
-              <Guitar size={15} />
-              <span>Ultimate Guitar × Synced YouTube Karaoke</span>
-            </div>
-            <h1>Strum along to any song on YouTube — perfectly in sync.</h1>
-            <p>
-              Search any song above or pick a guitar classic below. FretFlow pulls the YouTube
-              video, auto-corrects music-video intro skits via SponsorBlock, fetches word-by-word
-              lyrics, and detects beat-synced guitar chords with automatic Capo recommendations.
+            <h1>fretflow</h1>
+            <p className="welcome-role">synced guitar chords &amp; word-by-word lyrics from youtube</p>
+            <p className="welcome-lede">
+              Search any song above or pick one below. FretFlow pulls the YouTube track, aligns
+              intro offsets automatically, fetches word-synced lyrics, and detects beat-synced
+              chords with capo recommendations.
             </p>
           </div>
 
-          <div className="starter-grid">
-            {STARTER_SONGS.map((song) => (
-              <button
-                key={song.videoId}
-                type="button"
-                className="starter-card"
-                onClick={() => onQuickPickSong(song)}
-              >
-                <img
-                  src={song.thumbnailUrl}
-                  alt=""
-                  width={96}
-                  height={72}
-                  className="starter-thumb"
-                />
-                <div className="starter-info">
-                  <span className="starter-title">{song.title}</span>
-                  <span className="starter-artist">{song.artist}</span>
+          <section className="welcome-section" aria-label="Starter songs">
+            <h2 className="welcome-section-label">starter songs/</h2>
+            <div className="starter-grid">
+              {STARTER_SONGS.map((song) => (
+                <button
+                  key={song.videoId}
+                  type="button"
+                  className="starter-card"
+                  onClick={() => onQuickPickSong(song)}
+                >
+                  <div className="starter-info">
+                    <span className="starter-title">{song.title}</span>
+                    <span className="starter-sep">—</span>
+                    <span className="starter-artist">{song.artist}</span>
+                  </div>
                   <span className="starter-hint">{song.viewsText}</span>
-                </div>
-                <span className="starter-play-circle">
-                  <Play size={15} fill="currentColor" />
-                </span>
-              </button>
-            ))}
-          </div>
+                </button>
+              ))}
+            </div>
+          </section>
         </div>
       </div>
     );

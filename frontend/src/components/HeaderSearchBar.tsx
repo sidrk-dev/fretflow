@@ -27,6 +27,7 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResultItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<'all' | SearchResultType>('all');
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -37,23 +38,35 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
         setOpen(false);
       }
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+      }
+    };
     document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onClickOutside);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
 
   const runSearch = async (qText: string) => {
     const trimmed = qText.trim();
     if (!trimmed) return;
     setLoading(true);
+    setSearchError(null);
     setOpen(true);
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
       if (res.ok) {
         const data = (await res.json()) as SearchResponse;
         setResults(data.results);
+      } else {
+        setSearchError('Search service returned an error. Please try again.');
       }
     } catch {
-      // ignore network hiccup
+      setSearchError('Network error while searching. Check backend connection.');
     } finally {
       setLoading(false);
     }
@@ -78,12 +91,8 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
         }}
         title="Return to FretFlow Home"
       >
-        <div className="brand-icon">
-          <Guitar size={19} />
-        </div>
-        <span className="brand-name">
-          Fret<span>Flow</span>
-        </span>
+        <Guitar size={15} className="brand-mark" />
+        <span className="brand-name">fretflow</span>
       </button>
 
       <div className="search-shell" ref={wrapperRef}>
@@ -107,6 +116,7 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
               onClick={() => {
                 setQuery('');
                 setResults([]);
+                setSearchError(null);
               }}
               aria-label="Clear search"
             >
@@ -118,7 +128,7 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
           </button>
         </form>
 
-        {open && (loading || results.length > 0) && (
+        {open && (loading || searchError || results.length > 0) && (
           <div className="search-dropdown" role="listbox" aria-label="Song search results">
             <div className="search-tabs">
               {(['all', 'studio', 'video', 'live'] as const).map((t) => (
@@ -152,6 +162,10 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
               <div className="search-loading-row">
                 <Loader2 size={18} className="spin" />
                 <span>Searching YouTube Music & Videos…</span>
+              </div>
+            ) : searchError ? (
+              <div className="search-loading-row search-error-row" role="alert">
+                {searchError}
               </div>
             ) : filtered.length === 0 ? (
               <div className="search-loading-row">No matching videos in this tab.</div>
