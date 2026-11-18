@@ -1,0 +1,20 @@
+# Python / Backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/cache/
+backend/models/*.pth
+backend/models/*.pt
+*.pyc
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# OS / Editor
+.DS_Store
+.env
+.env.local
