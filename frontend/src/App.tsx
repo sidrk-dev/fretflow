@@ -11,7 +11,7 @@ import type { GuitarTransformSettings } from './lib/musicTransposer';
 import type { SearchResultItem, SongSection } from './types/music';
 
 export const App: React.FC = () => {
-  const { session, stage, error, loadSong, updateManualOffset } = useSongSession();
+  const { session, stage, error, loadSong, resetSession, updateManualOffset } = useSongSession();
   const [loopRange, setLoopRange] = useState<LoopRange | null>(null);
   const [settings, setSettings] = useState<GuitarTransformSettings>({
     capo: 0,
@@ -19,7 +19,6 @@ export const App: React.FC = () => {
     simplify: false,
   });
 
-  // Auto-apply recommended capo once per newly loaded videoId
   const appliedCapoVideoRef = useRef<string | null>(null);
   useEffect(() => {
     if (!session?.chords) return;
@@ -58,25 +57,31 @@ export const App: React.FC = () => {
     loadSong(item);
   };
 
-  // Keyboard shortcuts: Space = Play/Pause, [ / ] = ±250ms lyric sync nudge
+  const handleGoHome = () => {
+    setLoopRange(null);
+    appliedCapoVideoRef.current = null;
+    resetSession();
+  };
+
+  const hasLineSync = session?.lyrics?.hasLineSync ?? false;
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (e.code === 'Space') {
+      if (e.code === 'Space' && session) {
         e.preventDefault();
         togglePlay();
-      } else if (e.key === '[' && session) {
+      } else if (e.key === '[' && session && hasLineSync) {
         void updateManualOffset(session.manualOffsetMs - 250);
-      } else if (e.key === ']' && session) {
+      } else if (e.key === ']' && session && hasLineSync) {
         void updateManualOffset(session.manualOffsetMs + 250);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [togglePlay, session, updateManualOffset]);
+  }, [togglePlay, session, hasLineSync, updateManualOffset]);
 
-  // Determine current and next chord events for FretboardDeck
   const { currentEvent, nextEvent } = useMemo(() => {
     const evs = session?.chords?.events ?? [];
     if (!evs.length) return { currentEvent: null, nextEvent: null };
@@ -104,12 +109,13 @@ export const App: React.FC = () => {
   }, [session?.chords?.events, currentTimeMs]);
 
   const firstVocalStudioMs = useMemo(() => {
+    if (!hasLineSync) return null;
     const rawSections = session?.lyrics?.sections ?? [];
     for (const s of rawSections) {
       if (s.lines.length > 0) return s.lines[0].startMs;
     }
     return null;
-  }, [session?.lyrics?.sections]);
+  }, [session?.lyrics?.sections, hasLineSync]);
 
   const handleToggleSectionLoop = (sec: SongSection) => {
     if (
@@ -130,13 +136,13 @@ export const App: React.FC = () => {
     <div className="app-shell">
       <HeaderSearchBar
         onSelectSong={handleSelectSong}
+        onGoHome={handleGoHome}
         stage={stage}
         activeVideoId={session?.videoId ?? null}
       />
 
       <main className="studio-workspace-container">
-        <div className="studio-grid">
-          {/* Left Column: Guitar Toolbar + Beat Runway + Karaoke Chord-Lyric Stage */}
+        <div className={`studio-grid ${!session ? 'is-welcome' : ''}`}>
           <div className="left-stage-column">
             {session && (
               <>
@@ -147,6 +153,7 @@ export const App: React.FC = () => {
                   recommendedCapo={session.chords?.recommendedCapo ?? 0}
                   detectedKey={session.chords?.detectedKey ?? ''}
                   lyricsSource={session.lyrics?.source ?? null}
+                  uniqueChordCount={session.chords?.uniqueChords.length ?? 0}
                 />
                 <BeatRunway
                   currentTimeMs={currentTimeMs}
@@ -159,18 +166,14 @@ export const App: React.FC = () => {
               </>
             )}
 
-            {error && (
-              <div style={{ padding: '0.75rem 1.25rem', background: 'rgba(251,113,133,0.15)', color: '#fb7185', fontSize: '0.85rem' }}>
-                {error}
-              </div>
-            )}
+            {error && <div className="error-banner">{error}</div>}
 
             <KaraokeStage
               sections={session?.alignedSections ?? []}
               currentTimeMs={currentTimeMs}
               settings={settings}
               hasWordSync={session?.lyrics?.hasWordSync ?? false}
-              hasLineSync={session?.lyrics?.hasLineSync ?? false}
+              hasLineSync={hasLineSync}
               stage={stage}
               loopRange={loopRange}
               onToggleSectionLoop={handleToggleSectionLoop}
@@ -179,64 +182,64 @@ export const App: React.FC = () => {
             />
           </div>
 
-          {/* Right Rail: YouTube Video / Fallback Audio + Dual SVG Guitar Fretboard Deck */}
-          <aside className="right-rail-column">
-            <div className="video-frame-card">
-              {!session ? (
-                <div className="audio-fallback-card">
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.84rem' }}>
-                    YouTube Video Player will appear here
-                  </span>
+          {session && (
+            <aside className="right-rail-column">
+              <div className="rail-media-block">
+                <div className="video-frame-card">
+                  {useAudioFallback ? (
+                    <div key="audio-fallback" className="audio-fallback-card">
+                      <div className="audio-fallback-top">
+                        <img
+                          src={session.thumbnailUrl}
+                          alt=""
+                          className="audio-fallback-thumb"
+                        />
+                        <div className="audio-fallback-meta">
+                          <span className="audio-fallback-badge">Local HD Audio Stream</span>
+                          <strong className="audio-fallback-title">{session.title}</strong>
+                          <span className="audio-fallback-artist">{session.artist}</span>
+                        </div>
+                      </div>
+                      <audio
+                        ref={audioRef}
+                        src={session.audioReady ? `/api/audio/${session.videoId}` : undefined}
+                        onPlay={() => setIsPlaying(true)}
+                        onPause={() => setIsPlaying(false)}
+                        controls
+                        className="fallback-audio-el"
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      key={`yt-${session.videoId}`}
+                      ref={ytContainerRef}
+                      className="yt-mount-box"
+                    />
+                  )}
                 </div>
-              ) : useAudioFallback ? (
-                <div className="audio-fallback-card">
-                  <img
-                    src={session.thumbnailUrl}
-                    alt=""
-                    className="audio-fallback-thumb"
-                  />
-                  <span className="audio-fallback-badge">
-                    Local HD Audio Stream (Embed Restricted on YouTube)
-                  </span>
-                  <strong style={{ fontSize: '0.9rem' }}>
-                    {session.title} — {session.artist}
-                  </strong>
-                  <audio
-                    ref={audioRef}
-                    src={session.audioReady ? `/api/audio/${session.videoId}` : undefined}
-                    onPlay={() => setIsPlaying(true)}
-                    onPause={() => setIsPlaying(false)}
-                    controls
-                    style={{ width: '92%', height: 32 }}
-                  />
-                </div>
-              ) : (
-                <div ref={ytContainerRef} className="yt-mount-box" />
-              )}
-            </div>
 
-            {session && (
-              <div className="mode-switch-row">
-                <span>
-                  {session.artist} — <strong>{session.title}</strong>
-                </span>
-                <button
-                  type="button"
-                  className="link-btn"
-                  onClick={() => setUseAudioFallback(!useAudioFallback)}
-                >
-                  {useAudioFallback ? 'Try YouTube Video' : 'Switch to Audio Stream'}
-                </button>
+                <div className="mode-switch-row">
+                  <span className="now-playing-truncate">
+                    {session.artist} — <strong>{session.title}</strong>
+                  </span>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => setUseAudioFallback(!useAudioFallback)}
+                  >
+                    {useAudioFallback ? 'Try Video' : 'Audio Only'}
+                  </button>
+                </div>
               </div>
-            )}
 
-            <FretboardDeck
-              currentEvent={currentEvent}
-              nextEvent={nextEvent}
-              allEvents={session?.chords?.events ?? []}
-              settings={settings}
-            />
-          </aside>
+              <FretboardDeck
+                currentEvent={currentEvent}
+                nextEvent={nextEvent}
+                allEvents={session.chords?.events ?? []}
+                settings={settings}
+              />
+            </aside>
+          )}
         </div>
       </main>
 
@@ -247,6 +250,7 @@ export const App: React.FC = () => {
           durationMs={effectiveDurationMs}
           playbackRate={playbackRate}
           loopRange={loopRange}
+          hasLineSync={hasLineSync}
           autoOffsetMs={session.autoOffsetMs}
           manualOffsetMs={session.manualOffsetMs}
           skipSegments={session.skipSegments}

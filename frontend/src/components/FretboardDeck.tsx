@@ -25,23 +25,25 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
   onStrum,
 }) => {
   const numStrings = 6;
-  const numFrets = 4;
-  const width = compact ? 132 : 164;
-  const height = compact ? 158 : 192;
+  const positiveFrets = voicing.frets.filter((f) => f > 0);
+  const maxFret = positiveFrets.length ? Math.max(...positiveFrets) : 1;
+  const minFret = positiveFrets.length ? Math.min(...positiveFrets) : 1;
+  const hasOpen = voicing.frets.includes(0);
+  const baseFret =
+    hasOpen || (maxFret <= 4 && voicing.baseFret === 1) ? 1 : Math.max(1, minFret);
+  const numFrets = Math.max(4, maxFret - baseFret + 1);
+
+  const width = compact ? 124 : 156;
+  const height = compact ? 148 : 182;
   const padLeft = compact ? 24 : 28;
-  const padRight = 18;
-  const padTop = compact ? 34 : 40;
-  const padBottom = 22;
+  const padRight = 16;
+  const padTop = compact ? 32 : 38;
+  const padBottom = 20;
 
   const gridW = width - padLeft - padRight;
   const gridH = height - padTop - padBottom;
   const stringStep = gridW / (numStrings - 1);
   const fretStep = gridH / numFrets;
-
-  const positiveFrets = voicing.frets.filter((f) => f > 0);
-  const maxFret = positiveFrets.length ? Math.max(...positiveFrets) : 1;
-  const minFret = positiveFrets.length ? Math.min(...positiveFrets) : 1;
-  const baseFret = maxFret <= 4 ? 1 : Math.max(1, voicing.baseFret || minFret);
 
   return (
     <div
@@ -69,7 +71,6 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
         aria-label={`${chordLabel} guitar chord diagram`}
         className="fretboard-svg"
       >
-        {/* Nut or Base Fret Label */}
         {baseFret === 1 ? (
           <line
             x1={padLeft - 1}
@@ -82,7 +83,7 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
           />
         ) : (
           <text
-            x={padLeft - 8}
+            x={padLeft - 7}
             y={padTop + fretStep * 0.62}
             textAnchor="end"
             className="base-fret-text"
@@ -91,7 +92,6 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
           </text>
         )}
 
-        {/* Horizontal fret wires */}
         {Array.from({ length: numFrets + 1 }).map((_, fi) => (
           <line
             key={`f-${fi}`}
@@ -104,7 +104,6 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
           />
         ))}
 
-        {/* Vertical guitar strings (thicker bass -> thinner treble) */}
         {Array.from({ length: numStrings }).map((_, si) => (
           <g key={`s-${si}`}>
             <line
@@ -117,7 +116,7 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
             />
             <text
               x={padLeft + si * stringStep}
-              y={height - 5}
+              y={height - 4}
               textAnchor="middle"
               className="string-label-text"
             >
@@ -126,7 +125,6 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
           </g>
         ))}
 
-        {/* Barre bars */}
         {voicing.barres?.map((b, bi) => {
           const relFret = b.fret - baseFret + 1;
           if (relFret < 1 || relFret > numFrets) return null;
@@ -141,19 +139,18 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
               x2={x2}
               y2={cy}
               stroke={highlight ? '#f59e0b' : '#38bdf8'}
-              strokeWidth={compact ? 11 : 13}
+              strokeWidth={compact ? 10 : 12}
               strokeLinecap="round"
               opacity={0.9}
             />
           );
         })}
 
-        {/* Open (O), Muted (X), and Finger Dots */}
         {voicing.frets.map((fret, si) => {
           const cx = padLeft + si * stringStep;
           if (fret < 0) {
             return (
-              <text key={`m-${si}`} x={cx} y={padTop - 10} textAnchor="middle" className="mute-x">
+              <text key={`m-${si}`} x={cx} y={padTop - 9} textAnchor="middle" className="mute-x">
                 ×
               </text>
             );
@@ -163,8 +160,8 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
               <circle
                 key={`o-${si}`}
                 cx={cx}
-                cy={padTop - 13}
-                r={4.5}
+                cy={padTop - 12}
+                r={4.2}
                 fill="none"
                 stroke="#94a3b8"
                 strokeWidth={1.6}
@@ -181,11 +178,11 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
               <circle
                 cx={cx}
                 cy={cy}
-                r={compact ? 7.5 : 9}
+                r={compact ? 7 : 8.5}
                 fill={highlight ? '#f59e0b' : '#38bdf8'}
               />
               {finger > 0 && (
-                <text x={cx} y={cy + 3.5} textAnchor="middle" className="finger-num-text">
+                <text x={cx} y={cy + 3.4} textAnchor="middle" className="finger-num-text">
                   {finger}
                 </text>
               )}
@@ -283,7 +280,6 @@ export const FretboardDeck: React.FC<FretboardDeckProps> = ({
     );
   };
 
-  // Deduplicate unique chords in song for the native Popover dictionary
   const uniqueMap = new Map<string, { rootPc: number; quality: string; label: string }>();
   for (const ev of allEvents) {
     const tx = transformChord(ev.rootPc, ev.quality, ev.bassPc, settings);
@@ -318,7 +314,6 @@ export const FretboardDeck: React.FC<FretboardDeckProps> = ({
         {renderSlot(nextEvent, 'UP NEXT', false)}
       </div>
 
-      {/* Native HTML Top-Layer Popover for All Chords in the Song */}
       <div id="all-song-chords-popover" popover="auto" className="chords-dictionary-popover">
         <div className="popover-header">
           <div>

@@ -1,0 +1,13 @@
+services:
+  fretflow:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173
+    volumes:
+      - fretflow_cache:/app/backend/cache
+    restart: unless-stopped
+
+volumes:
+  fretflow_cache:

@@ -15,12 +15,6 @@ declare global {
           };
         }
       ) => YTPlayerInstance;
-      PlayerState?: {
-        PLAYING: number;
-        PAUSED: number;
-        ENDED: number;
-        BUFFERING: number;
-      };
     };
     onYouTubeIframeAPIReady?: () => void;
   }
@@ -79,7 +73,23 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
   const [durationMs, setDurationMs] = useState(0);
   const [playbackRate, setPlaybackRateState] = useState(1.0);
 
-  // High-resolution rAF interpolation state for sub-16ms karaoke smoothness
+  const currentTimeMsRef = useRef(0);
+  const durationMsRef = useRef(0);
+
+  const updateCurrentTime = useCallback((ms: number) => {
+    if (currentTimeMsRef.current !== ms) {
+      currentTimeMsRef.current = ms;
+      setCurrentTimeMs(ms);
+    }
+  }, []);
+
+  const updateDuration = useCallback((ms: number) => {
+    if (ms > 0 && durationMsRef.current !== ms) {
+      durationMsRef.current = ms;
+      setDurationMs(ms);
+    }
+  }, []);
+
   const interpRef = useRef({
     lastRawMediaSec: 0,
     anchorMediaSec: 0,
@@ -90,15 +100,22 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
   const rateRef = useRef(playbackRate);
   rateRef.current = playbackRate;
 
-  // Reset state when videoId changes
+  // Reset state cleanly when videoId changes
   useEffect(() => {
     setUseAudioFallback(false);
     setIsPlaying(false);
+    currentTimeMsRef.current = 0;
+    durationMsRef.current = 0;
     setCurrentTimeMs(0);
-    interpRef.current = { lastRawMediaSec: 0, anchorMediaSec: 0, anchorPerfMs: performance.now() };
+    setDurationMs(0);
+    interpRef.current = {
+      lastRawMediaSec: 0,
+      anchorMediaSec: 0,
+      anchorPerfMs: performance.now(),
+    };
   }, [videoId]);
 
-  // Mount/update YouTube IFrame Player
+  // Mount & cleanly destroy YouTube IFrame Player whenever videoId or useAudioFallback changes
   useEffect(() => {
     if (!videoId || useAudioFallback) return;
     let cancelled = false;
@@ -106,22 +123,11 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
     void ensureYouTubeApi().then(() => {
       if (cancelled || !ytContainerRef.current || !window.YT) return;
 
-      if (ytPlayerRef.current) {
-        try {
-          ytPlayerRef.current.loadVideoById(videoId);
-          ytPlayerRef.current.setPlaybackRate(rateRef.current);
-          return;
-        } catch {
-          ytPlayerRef.current.destroy();
-          ytPlayerRef.current = null;
-        }
-      }
-
       const mountNode = document.createElement('div');
       ytContainerRef.current.innerHTML = '';
       ytContainerRef.current.appendChild(mountNode);
 
-      ytPlayerRef.current = new window.YT.Player(mountNode, {
+      const player = new window.YT.Player(mountNode, {
         videoId,
         playerVars: {
           autoplay: 1,
@@ -134,8 +140,11 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
           onReady: (e) => {
             if (cancelled) return;
             const dur = e.target.getDuration();
-            if (dur > 0) setDurationMs(Math.round(dur * 1000));
+            if (dur > 0) updateDuration(Math.round(dur * 1000));
             e.target.setPlaybackRate(rateRef.current);
+            if (currentTimeMsRef.current > 0) {
+              e.target.seekTo(currentTimeMsRef.current / 1000, true);
+            }
           },
           onStateChange: (e) => {
             if (cancelled) return;
@@ -148,10 +157,10 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
               anchorPerfMs: performance.now(),
             };
             const dur = e.target.getDuration();
-            if (dur > 0) setDurationMs(Math.round(dur * 1000));
+            if (dur > 0) updateDuration(Math.round(dur * 1000));
           },
           onError: (e) => {
-            // Codes 101 / 150 = VEVO / owner blocked embedded playback -> switch to local audio stream!
+            if (cancelled) return;
             if ([2, 5, 100, 101, 150].includes(e.data)) {
               setUseAudioFallback(true);
               setIsPlaying(false);
@@ -159,16 +168,11 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
           },
         },
       });
+      ytPlayerRef.current = player;
     });
 
     return () => {
       cancelled = true;
-    };
-  }, [videoId, useAudioFallback]);
-
-  // Cleanup YT player on unmount
-  useEffect(() => {
-    return () => {
       if (ytPlayerRef.current) {
         try {
           ytPlayerRef.current.destroy();
@@ -178,41 +182,48 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
         ytPlayerRef.current = null;
       }
     };
-  }, []);
+  }, [videoId, useAudioFallback, updateDuration]);
 
-  // Auto-play HTML5 fallback audio once backend finishes extracting MP3
+  // Sync current position and auto-play HTML5 fallback audio when ready
   useEffect(() => {
     if (!useAudioFallback || !videoId || !audioReady || !audioRef.current) return;
     const el = audioRef.current;
     el.playbackRate = rateRef.current;
     el.preservesPitch = true;
+    if (currentTimeMsRef.current > 0 && Math.abs(el.currentTime * 1000 - currentTimeMsRef.current) > 300) {
+      el.currentTime = currentTimeMsRef.current / 1000;
+    }
     void el.play().catch(() => {});
   }, [useAudioFallback, videoId, audioReady]);
 
   const seekToMs = useCallback(
     (ms: number) => {
-      const clampedMs = Math.max(0, ms);
+      const clampedMs = Math.max(0, Math.round(ms));
       const sec = clampedMs / 1000;
       interpRef.current = {
         lastRawMediaSec: sec,
         anchorMediaSec: sec,
         anchorPerfMs: performance.now(),
       };
-      setCurrentTimeMs(clampedMs);
+      updateCurrentTime(clampedMs);
 
       if (useAudioFallback && audioRef.current) {
         audioRef.current.currentTime = sec;
       } else if (ytPlayerRef.current) {
-        ytPlayerRef.current.seekTo(sec, true);
+        try {
+          ytPlayerRef.current.seekTo(sec, true);
+        } catch {
+          // Player still mounting; currentTimeMsRef will apply in onReady
+        }
       }
     },
-    [useAudioFallback]
+    [useAudioFallback, updateCurrentTime]
   );
 
   const togglePlay = useCallback(() => {
     if (useAudioFallback && audioRef.current) {
       if (audioRef.current.paused) {
-        void audioRef.current.play();
+        void audioRef.current.play().catch(() => {});
       } else {
         audioRef.current.pause();
       }
@@ -220,11 +231,15 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
     }
     const p = ytPlayerRef.current;
     if (!p) return;
-    const st = p.getPlayerState();
-    if (st === 1) {
-      p.pauseVideo();
-    } else {
-      p.playVideo();
+    try {
+      const st = p.getPlayerState();
+      if (st === 1) {
+        p.pauseVideo();
+      } else {
+        p.playVideo();
+      }
+    } catch {
+      // ignore if player not ready yet
     }
   }, [useAudioFallback]);
 
@@ -236,30 +251,37 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
         audioRef.current.playbackRate = rate;
         audioRef.current.preservesPitch = true;
       } else if (ytPlayerRef.current) {
-        ytPlayerRef.current.setPlaybackRate(rate);
+        try {
+          ytPlayerRef.current.setPlaybackRate(rate);
+        } catch {
+          // ignore
+        }
       }
     },
     [useAudioFallback]
   );
 
-  // 60fps smooth clock + A-B loop enforcement
+  // 60fps smooth clock + A-B loop enforcement with zero idle re-renders
   useEffect(() => {
+    if (!videoId) return;
     let rafId = 0;
 
     const tick = () => {
       const now = performance.now();
-      let computedMs = currentTimeMs;
+      let computedMs = currentTimeMsRef.current;
 
       if (useAudioFallback && audioRef.current) {
         const el = audioRef.current;
-        computedMs = Math.round(el.currentTime * 1000);
+        if (!el.paused || el.currentTime > 0) {
+          computedMs = Math.round(el.currentTime * 1000);
+        }
         if (el.duration && Number.isFinite(el.duration)) {
-          setDurationMs(Math.round(el.duration * 1000));
+          updateDuration(Math.round(el.duration * 1000));
         }
       } else if (ytPlayerRef.current) {
         try {
-          const rawSec = ytPlayerRef.current.getCurrentTime() || 0;
           const st = ytPlayerRef.current.getPlayerState();
+          const rawSec = ytPlayerRef.current.getCurrentTime() || 0;
           const playing = st === 1;
 
           if (Math.abs(rawSec - interpRef.current.lastRawMediaSec) > 0.001) {
@@ -271,9 +293,12 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
           }
 
           if (playing) {
-            const elapsedSec = ((now - interpRef.current.anchorPerfMs) / 1000) * rateRef.current;
-            computedMs = Math.round((interpRef.current.anchorMediaSec + Math.min(elapsedSec, 0.35)) * 1000);
-          } else {
+            const elapsedSec =
+              ((now - interpRef.current.anchorPerfMs) / 1000) * rateRef.current;
+            computedMs = Math.round(
+              (interpRef.current.anchorMediaSec + Math.min(elapsedSec, 0.35)) * 1000
+            );
+          } else if (rawSec > 0) {
             computedMs = Math.round(rawSec * 1000);
           }
         } catch {
@@ -285,7 +310,7 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
       if (activeLoop && computedMs >= activeLoop.endMs) {
         seekToMs(activeLoop.startMs);
       } else {
-        setCurrentTimeMs(computedMs);
+        updateCurrentTime(computedMs);
       }
 
       rafId = requestAnimationFrame(tick);
@@ -293,7 +318,7 @@ export function usePlaybackClock({ videoId, audioReady, loopRange }: UsePlayback
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [useAudioFallback, seekToMs]);
+  }, [videoId, useAudioFallback, seekToMs, updateCurrentTime, updateDuration]);
 
   return {
     ytContainerRef,

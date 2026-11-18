@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import re
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
+
+YOUTUBE_ID_PATTERN = r"^[A-Za-z0-9_-]{11}$"
+YOUTUBE_ID_RE = re.compile(YOUTUBE_ID_PATTERN)
 
 
 class SearchResultItem(BaseModel):
@@ -97,7 +101,15 @@ class SkipSegment(BaseModel):
 
 
 class LyricsPayload(BaseModel):
-    source: Literal["betterlyrics_ttml", "lrclib_word", "lrclib_line", "syncedlyrics_word", "syncedlyrics_line", "plain", "none"]
+    source: Literal[
+        "betterlyrics_ttml",
+        "lrclib_word",
+        "lrclib_line",
+        "syncedlyrics_word",
+        "syncedlyrics_line",
+        "plain",
+        "none",
+    ]
     hasWordSync: bool
     hasLineSync: bool
     plainText: str = ""
@@ -132,4 +144,4 @@ class SongSession(BaseModel):
 
 
 class OffsetUpdateRequest(BaseModel):
-    manualOffsetMs: int
+    manualOffsetMs: int = Field(..., ge=-300_000, le=300_000)

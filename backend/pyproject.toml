@@ -32,3 +32,7 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+

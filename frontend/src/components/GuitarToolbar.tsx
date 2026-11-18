@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Wand2 } from 'lucide-react';
+import { Grid2X2, Sparkles, Wand2 } from 'lucide-react';
 import type { GuitarTransformSettings } from '../lib/musicTransposer';
 import type { CapoOption, LyricsSource } from '../types/music';
 
@@ -10,16 +10,17 @@ interface GuitarToolbarProps {
   recommendedCapo: number;
   detectedKey: string;
   lyricsSource: LyricsSource | null;
+  uniqueChordCount: number;
 }
 
 const SOURCE_LABELS: Record<LyricsSource, string> = {
-  betterlyrics_ttml: 'Word Sync + Sections (TTML)',
+  betterlyrics_ttml: 'Word Sync + Sections',
   lrclib_word: 'LRCLIB Word Sync',
   lrclib_line: 'LRCLIB Line Sync',
   syncedlyrics_word: 'Enhanced Word LRC',
   syncedlyrics_line: 'Synced LRC',
-  plain: 'Unsynced Plain Lyrics',
-  none: 'Instrumental / Chords Only',
+  plain: 'Unsynced Lyrics',
+  none: 'Instrumental Chords',
 };
 
 export const GuitarToolbar: React.FC<GuitarToolbarProps> = ({
@@ -29,6 +30,7 @@ export const GuitarToolbar: React.FC<GuitarToolbarProps> = ({
   recommendedCapo,
   detectedKey,
   lyricsSource,
+  uniqueChordCount,
 }) => {
   const recOption = capoOptions.find((o) => o.capoFret === recommendedCapo);
   const showCapoBanner = recommendedCapo > 0 && recOption;
@@ -51,13 +53,13 @@ export const GuitarToolbar: React.FC<GuitarToolbarProps> = ({
             <Wand2 size={14} />
             <span>
               {settings.capo === recommendedCapo
-                ? `Capo ${recommendedCapo} Active (${recOption.previewChords.slice(0, 4).join(' • ')})`
-                : `Recommended: Capo ${recommendedCapo} → ${recOption.previewChords.slice(0, 4).join(' • ')}`}
+                ? `Capo ${recommendedCapo} (${recOption.previewChords.slice(0, 4).join(' • ')})`
+                : `Use Capo ${recommendedCapo} → ${recOption.previewChords.slice(0, 4).join(' • ')}`}
             </span>
           </button>
         )}
 
-        {detectedKey && <span className="key-chip">Concert Key: {detectedKey}</span>}
+        {detectedKey && <span className="key-chip">Key: {detectedKey}</span>}
         {lyricsSource && <span className="source-chip">{SOURCE_LABELS[lyricsSource]}</span>}
       </div>
 
@@ -72,7 +74,9 @@ export const GuitarToolbar: React.FC<GuitarToolbarProps> = ({
           >
             −
           </button>
-          <span className="stepper-value">{settings.capo === 0 ? 'Off' : `Fret ${settings.capo}`}</span>
+          <span className="stepper-value">
+            {settings.capo === 0 ? 'Off' : `Fret ${settings.capo}`}
+          </span>
           <button
             type="button"
             className="stepper-btn"
@@ -84,13 +88,14 @@ export const GuitarToolbar: React.FC<GuitarToolbarProps> = ({
         </div>
 
         <div className="stepper-group" aria-label="Transpose semitones">
-          <span className="stepper-label">Transpose</span>
+          <span className="stepper-label">Key</span>
           <button
             type="button"
             className="stepper-btn"
             onClick={() =>
               onChangeSettings({ ...settings, transpose: Math.max(-6, settings.transpose - 1) })
             }
+            disabled={settings.transpose <= -6}
           >
             −
           </button>
@@ -103,6 +108,7 @@ export const GuitarToolbar: React.FC<GuitarToolbarProps> = ({
             onClick={() =>
               onChangeSettings({ ...settings, transpose: Math.min(6, settings.transpose + 1) })
             }
+            disabled={settings.transpose >= 6}
           >
             +
           </button>
@@ -117,6 +123,17 @@ export const GuitarToolbar: React.FC<GuitarToolbarProps> = ({
           <Sparkles size={13} />
           <span>Simplify</span>
         </button>
+
+        {uniqueChordCount > 0 && (
+          <button
+            type="button"
+            popoverTarget="all-song-chords-popover"
+            className="toolbar-chords-btn"
+          >
+            <Grid2X2 size={13} />
+            <span>Chords ({uniqueChordCount})</span>
+          </button>
+        )}
       </div>
     </div>
   );

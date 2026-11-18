@@ -6,6 +6,7 @@ interface UseSongSessionResult {
   stage: SessionStage;
   error: string | null;
   loadSong: (item: SearchResultItem) => void;
+  resetSession: () => void;
   updateManualOffset: (newManualOffsetMs: number) => Promise<void>;
 }
 
@@ -13,7 +14,11 @@ export function useSongSession(): UseSongSessionResult {
   const [session, setSession] = useState<SongSession | null>(null);
   const [stage, setStage] = useState<SessionStage>('idle');
   const [error, setError] = useState<string | null>(null);
+
   const esRef = useRef<EventSource | null>(null);
+  const sessionRef = useRef<SongSession | null>(null);
+  sessionRef.current = session;
+  const patchSeqRef = useRef(0);
 
   const closeStream = useCallback(() => {
     if (esRef.current) {
@@ -24,12 +29,21 @@ export function useSongSession(): UseSongSessionResult {
 
   useEffect(() => closeStream, [closeStream]);
 
+  const resetSession = useCallback(() => {
+    closeStream();
+    patchSeqRef.current += 1;
+    setError(null);
+    setStage('idle');
+    setSession(null);
+  }, [closeStream]);
+
   const loadSong = useCallback(
     (item: SearchResultItem) => {
       closeStream();
+      patchSeqRef.current += 1;
       setError(null);
       setStage('loading_lyrics');
-      setSession({
+      const initial: SongSession = {
         videoId: item.videoId,
         title: item.title,
         artist: item.artist,
@@ -43,7 +57,9 @@ export function useSongSession(): UseSongSessionResult {
         chords: null,
         alignedSections: [],
         audioReady: false,
-      });
+      };
+      sessionRef.current = initial;
+      setSession(initial);
 
       const params = new URLSearchParams({
         title: item.title,
@@ -98,25 +114,31 @@ export function useSongSession(): UseSongSessionResult {
   );
 
   const updateManualOffset = useCallback(async (newManualOffsetMs: number) => {
-    setSession((prev) => (prev ? { ...prev, manualOffsetMs: newManualOffsetMs } : prev));
-    setSession((current) => {
-      if (!current) return null;
-      void fetch(`/api/session/${encodeURIComponent(current.videoId)}/offset`, {
+    const clamped = Math.max(-300_000, Math.min(300_000, Math.round(newManualOffsetMs)));
+    const cur = sessionRef.current;
+    if (!cur) return;
+
+    const targetVideoId = cur.videoId;
+    const seq = ++patchSeqRef.current;
+    setSession((prev) => (prev ? { ...prev, manualOffsetMs: clamped } : null));
+
+    try {
+      const res = await fetch(`/api/session/${encodeURIComponent(targetVideoId)}/offset`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ manualOffsetMs: newManualOffsetMs }),
-      })
-        .then((res) => (res.ok ? (res.json() as Promise<SongSession>) : null))
-        .then((updated) => {
-          if (updated) {
-            setSession((latest) =>
-              latest && latest.videoId === updated.videoId ? updated : latest
-            );
-          }
-        });
-      return current;
-    });
+        body: JSON.stringify({ manualOffsetMs: clamped }),
+      });
+      if (!res.ok || seq !== patchSeqRef.current) return;
+      const updated = (await res.json()) as SongSession;
+      if (seq === patchSeqRef.current) {
+        setSession((latest) =>
+          latest && latest.videoId === updated.videoId ? updated : latest
+        );
+      }
+    } catch {
+      // Ignore transient network errors; optimistic manualOffsetMs remains set
+    }
   }, []);
 
-  return { session, stage, error, loadSong, updateManualOffset };
+  return { session, stage, error, loadSong, resetSession, updateManualOffset };
 }

@@ -7,6 +7,21 @@ from .schemas import SkipSegment
 SPONSORBLOCK_URL = "https://sponsor.ajay.app/api/skipSegments"
 
 
+def merge_skip_segments(segments: list[SkipSegment], gap_tolerance_ms: int = 1000) -> list[SkipSegment]:
+    """Sort and merge overlapping or contiguous (<1s gap) SponsorBlock segments."""
+    if not segments:
+        return []
+    ordered = sorted(segments, key=lambda s: (s.startMs, s.endMs))
+    merged: list[SkipSegment] = [ordered[0].model_copy()]
+    for seg in ordered[1:]:
+        last = merged[-1]
+        if seg.startMs <= last.endMs + gap_tolerance_ms:
+            last.endMs = max(last.endMs, seg.endMs)
+        else:
+            merged.append(seg.model_copy())
+    return merged
+
+
 async def fetch_sponsorblock_offsets(
     video_id: str, video_duration_sec: int = 0
 ) -> tuple[int, int, list[SkipSegment]]:
@@ -14,7 +29,7 @@ async def fetch_sponsorblock_offsets(
     Query SponsorBlock `music_offtopic` segments for a YouTube video.
 
     Returns:
-        (auto_offset_ms, effective_song_duration_sec, skip_segments)
+        (auto_offset_ms, effective_song_duration_sec, merged_skip_segments)
     """
     if not video_id:
         return 0, video_duration_sec, []
@@ -36,9 +51,7 @@ async def fetch_sponsorblock_offsets(
     except Exception:
         return 0, video_duration_sec, []
 
-    segments: list[SkipSegment] = []
-    intro_offset_ms = 0
-    total_skipped_sec = 0.0
+    raw_segments: list[SkipSegment] = []
     inferred_vid_dur = float(video_duration_sec)
 
     for item in data:
@@ -52,22 +65,20 @@ async def fetch_sponsorblock_offsets(
         if vid_d > inferred_vid_dur:
             inferred_vid_dur = vid_d
 
-        start_ms = int(round(start_s * 1000))
-        end_ms = int(round(end_s * 1000))
-        segments.append(
+        raw_segments.append(
             SkipSegment(
                 category=str(item.get("category") or "music_offtopic"),
-                startMs=start_ms,
-                endMs=end_ms,
+                startMs=int(round(start_s * 1000)),
+                endMs=int(round(end_s * 1000)),
             )
         )
-        total_skipped_sec += end_s - start_s
-        # Non-music intro starting near 0:00 shifts studio lyrics forward by end_ms
-        if start_s <= 2.0 and end_ms > intro_offset_ms:
-            intro_offset_ms = end_ms
+
+    merged = merge_skip_segments(raw_segments)
+    total_skipped_sec = sum((s.endMs - s.startMs) / 1000.0 for s in merged)
+    intro_offset_ms = merged[0].endMs if (merged and merged[0].startMs <= 3000) else 0
 
     effective_dur = int(round(max(0.0, inferred_vid_dur - total_skipped_sec)))
     if effective_dur <= 0:
         effective_dur = video_duration_sec
 
-    return intro_offset_ms, effective_dur, segments
+    return intro_offset_ms, effective_dur, merged

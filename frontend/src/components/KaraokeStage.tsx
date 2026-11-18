@@ -7,6 +7,7 @@ import { transformChord } from '../lib/musicTransposer';
 import type {
   ChordAnchor,
   LyricLine,
+  LyricWord,
   SearchResultItem,
   SessionStage,
   SongSection,
@@ -94,6 +95,49 @@ const STARTER_SONGS: SearchResultItem[] = [
   },
 ];
 
+interface WordPhraseChunk {
+  chords: ChordAnchor[];
+  words: LyricWord[];
+}
+
+/**
+ * Group lyric words into chord-phrase spans (`[Em7] -> ["I ", "don't ", "believe "]`)
+ * so chord badges NEVER inject unnatural mid-word or mid-sentence horizontal gaps!
+ */
+function groupWordsIntoChordPhrases(line: LyricLine): WordPhraseChunk[] {
+  const words = line.words;
+  if (!words.length) return [];
+  if (!line.chords.length) {
+    return [{ chords: [], words }];
+  }
+
+  const chordsByWord = new Map<number, ChordAnchor[]>();
+  for (const ch of line.chords) {
+    const wi = Math.min(words.length - 1, Math.max(0, ch.wordIndex ?? 0));
+    const list = chordsByWord.get(wi) ?? [];
+    list.push(ch);
+    chordsByWord.set(wi, list);
+  }
+
+  const splitIndices = Array.from(chordsByWord.keys()).sort((a, b) => a - b);
+  const chunks: WordPhraseChunk[] = [];
+
+  if (splitIndices[0] > 0) {
+    chunks.push({ chords: [], words: words.slice(0, splitIndices[0]) });
+  }
+
+  for (let i = 0; i < splitIndices.length; i++) {
+    const startWi = splitIndices[i];
+    const endWi = i + 1 < splitIndices.length ? splitIndices[i + 1] : words.length;
+    chunks.push({
+      chords: chordsByWord.get(startWi) ?? [],
+      words: words.slice(startWi, endWi),
+    });
+  }
+
+  return chunks;
+}
+
 function splitLineByChordOffsets(
   line: LyricLine
 ): { anchor: ChordAnchor | null; segment: string }[] {
@@ -155,7 +199,6 @@ export const KaraokeStage: React.FC<KaraokeStageProps> = ({
     };
   }, []);
 
-  // Locate active line or instrumental section ID
   const activeTargetId = useMemo(() => {
     if (!hasLineSync && sections.every((s) => s.kind === 'lyrics')) return null;
     for (const sec of sections) {
@@ -174,14 +217,18 @@ export const KaraokeStage: React.FC<KaraokeStageProps> = ({
     return null;
   }, [sections, currentTimeMs, hasLineSync]);
 
-  // Smoothly center active lyric line unless guitarist scrolled manually
   useEffect(() => {
-    if (userPausedAutoScroll || !activeTargetId || !activeElementRef.current || !scrollerRef.current) {
+    if (
+      userPausedAutoScroll ||
+      !activeTargetId ||
+      !activeElementRef.current ||
+      !scrollerRef.current
+    ) {
       return;
     }
     const container = scrollerRef.current;
     const el = activeElementRef.current;
-    const targetTop = el.offsetTop - container.clientHeight * 0.34;
+    const targetTop = el.offsetTop - container.clientHeight * 0.32;
     container.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
   }, [activeTargetId, userPausedAutoScroll]);
 
@@ -194,44 +241,46 @@ export const KaraokeStage: React.FC<KaraokeStageProps> = ({
   if (stage === 'idle') {
     return (
       <div className="karaoke-stage welcome-stage">
-        <div className="welcome-hero">
-          <div className="welcome-badge">
-            <Guitar size={15} />
-            <span>Ultimate Guitar × Synced YouTube Karaoke</span>
+        <div className="welcome-inner">
+          <div className="welcome-hero">
+            <div className="welcome-badge">
+              <Guitar size={15} />
+              <span>Ultimate Guitar × Synced YouTube Karaoke</span>
+            </div>
+            <h1>Strum along to any song on YouTube — perfectly in sync.</h1>
+            <p>
+              Search any song above or pick a guitar classic below. FretFlow pulls the YouTube
+              video, auto-corrects music-video intro skits via SponsorBlock, fetches word-by-word
+              lyrics, and detects beat-synced guitar chords with automatic Capo recommendations.
+            </p>
           </div>
-          <h1>Strum along to any song on YouTube — perfectly in sync.</h1>
-          <p>
-            Search any song above or pick a guitar classic below. FretFlow pulls the YouTube video,
-            auto-corrects music-video intro skits via SponsorBlock, fetches word-by-word lyrics, and
-            detects beat-synced guitar chords with automatic Capo recommendations.
-          </p>
-        </div>
 
-        <div className="starter-grid">
-          {STARTER_SONGS.map((song) => (
-            <button
-              key={song.videoId}
-              type="button"
-              className="starter-card"
-              onClick={() => onQuickPickSong(song)}
-            >
-              <img
-                src={song.thumbnailUrl}
-                alt=""
-                width={96}
-                height={72}
-                className="starter-thumb"
-              />
-              <div className="starter-info">
-                <span className="starter-title">{song.title}</span>
-                <span className="starter-artist">{song.artist}</span>
-                <span className="starter-hint">{song.viewsText}</span>
-              </div>
-              <span className="starter-play-circle">
-                <Play size={15} fill="currentColor" />
-              </span>
-            </button>
-          ))}
+          <div className="starter-grid">
+            {STARTER_SONGS.map((song) => (
+              <button
+                key={song.videoId}
+                type="button"
+                className="starter-card"
+                onClick={() => onQuickPickSong(song)}
+              >
+                <img
+                  src={song.thumbnailUrl}
+                  alt=""
+                  width={96}
+                  height={72}
+                  className="starter-thumb"
+                />
+                <div className="starter-info">
+                  <span className="starter-title">{song.title}</span>
+                  <span className="starter-artist">{song.artist}</span>
+                  <span className="starter-hint">{song.viewsText}</span>
+                </div>
+                <span className="starter-play-circle">
+                  <Play size={15} fill="currentColor" />
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -320,19 +369,8 @@ export const KaraokeStage: React.FC<KaraokeStageProps> = ({
                       const isLineActive = activeTargetId === line.id;
                       const isLinePast = hasLineSync && currentTimeMs > line.endMs;
 
-                      // Word-by-word karaoke rendering with chords anchored above specific words
                       if (line.words.length > 0) {
-                        const chordsByWord = new Map<number, ChordAnchor[]>();
-                        line.chords.forEach((ch) => {
-                          const wi = Math.min(
-                            line.words.length - 1,
-                            Math.max(0, ch.wordIndex ?? 0)
-                          );
-                          const existing = chordsByWord.get(wi) ?? [];
-                          existing.push(ch);
-                          chordsByWord.set(wi, existing);
-                        });
-
+                        const phraseChunks = groupWordsIntoChordPhrases(line);
                         const hasAnyChordsOnLine = line.chords.length > 0;
 
                         return (
@@ -344,88 +382,82 @@ export const KaraokeStage: React.FC<KaraokeStageProps> = ({
                             }`}
                           >
                             <div className="word-tokens-wrap">
-                              {line.words.map((w, wi) => {
-                                const attachedChords = chordsByWord.get(wi) ?? [];
-                                let fillPct = 0;
-                                if (currentTimeMs >= w.endMs) fillPct = 100;
-                                else if (currentTimeMs > w.startMs) {
-                                  fillPct = Math.min(
-                                    100,
-                                    Math.round(
-                                      ((currentTimeMs - w.startMs) /
-                                        Math.max(60, w.endMs - w.startMs)) *
-                                        100
-                                    )
-                                  );
-                                }
-
-                                return (
-                                  <span key={`${line.id}-w-${wi}`} className="word-chord-stack">
-                                    {hasAnyChordsOnLine && (
-                                      <span className="chord-above-slot">
-                                        {attachedChords.map((ch, ci) => {
-                                          const tx = transformChord(
-                                            ch.rootPc,
-                                            ch.quality,
-                                            ch.bassPc,
-                                            settings
-                                          );
-                                          const chActive =
-                                            currentTimeMs >= ch.startMs - 80 &&
-                                            currentTimeMs < ch.endMs;
-                                          return (
-                                            <button
-                                              key={ci}
-                                              type="button"
-                                              className={`inline-chord-badge ${
-                                                chActive ? 'chord-now' : ''
-                                              }`}
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                strumAnchor(ch);
-                                              }}
-                                              title="Click to hear chord voicing"
-                                            >
-                                              {tx.label}
-                                            </button>
-                                          );
-                                        })}
-                                      </span>
-                                    )}
-                                    <span
-                                      className={`karaoke-word ${
-                                        fillPct > 0 && fillPct < 100 ? 'word-singing' : ''
-                                      } ${fillPct >= 100 ? 'word-sung' : ''}`}
-                                      style={{ '--fill-pct': `${fillPct}%` } as React.CSSProperties}
-                                      onClick={() => onSeekMs(w.startMs)}
-                                    >
-                                      {w.text}
+                              {phraseChunks.map((chunk, ci) => (
+                                <span key={`${line.id}-p-${ci}`} className="word-chord-stack">
+                                  {hasAnyChordsOnLine && (
+                                    <span className="chord-above-slot">
+                                      {chunk.chords.map((ch, chi) => {
+                                        const tx = transformChord(
+                                          ch.rootPc,
+                                          ch.quality,
+                                          ch.bassPc,
+                                          settings
+                                        );
+                                        const chActive =
+                                          currentTimeMs >= ch.startMs - 80 &&
+                                          currentTimeMs < ch.endMs;
+                                        return (
+                                          <button
+                                            key={chi}
+                                            type="button"
+                                            className={`inline-chord-badge ${
+                                              chActive ? 'chord-now' : ''
+                                            }`}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              strumAnchor(ch);
+                                            }}
+                                            title="Click to hear chord voicing"
+                                          >
+                                            {tx.label}
+                                          </button>
+                                        );
+                                      })}
                                     </span>
+                                  )}
+                                  <span className="phrase-words-row">
+                                    {chunk.words.map((w, wi) => {
+                                      let fillPct = 0;
+                                      if (w.endMs === 0 || currentTimeMs >= w.endMs) {
+                                        fillPct = 100;
+                                      } else if (currentTimeMs > w.startMs) {
+                                        fillPct = Math.min(
+                                          100,
+                                          Math.round(
+                                            ((currentTimeMs - w.startMs) /
+                                              Math.max(60, w.endMs - w.startMs)) *
+                                              100
+                                          )
+                                        );
+                                      }
+
+                                      return (
+                                        <span
+                                          key={wi}
+                                          className={`karaoke-word ${
+                                            fillPct > 0 && fillPct < 100 ? 'word-singing' : ''
+                                          } ${fillPct >= 100 ? 'word-sung' : ''}`}
+                                          style={
+                                            { '--fill-pct': `${fillPct}%` } as React.CSSProperties
+                                          }
+                                          onClick={() => onSeekMs(w.startMs)}
+                                        >
+                                          {w.text}
+                                        </span>
+                                      );
+                                    })}
                                   </span>
-                                );
-                              })}
+                                </span>
+                              ))}
                             </div>
                           </div>
                         );
                       }
 
-                      // Line-synced rendering with chords anchored above character offsets
+                      // Line-synced rendering with smooth line progress sweep
                       const segments = splitLineByChordOffsets(line);
                       const hasChords = line.chords.length > 0;
-                      let linePct = 0;
-                      if (hasLineSync) {
-                        if (currentTimeMs >= line.endMs) linePct = 100;
-                        else if (currentTimeMs > line.startMs) {
-                          linePct = Math.min(
-                            100,
-                            Math.round(
-                              ((currentTimeMs - line.startMs) /
-                                Math.max(200, line.endMs - line.startMs)) *
-                                100
-                            )
-                          );
-                        }
-                      }
+                      const isLineSung = hasLineSync && currentTimeMs >= line.endMs;
 
                       return (
                         <div
@@ -436,10 +468,7 @@ export const KaraokeStage: React.FC<KaraokeStageProps> = ({
                           }`}
                           onClick={() => hasLineSync && onSeekMs(line.startMs)}
                         >
-                          <div
-                            className="line-segments-wrap"
-                            style={{ '--line-pct': `${linePct}%` } as React.CSSProperties}
-                          >
+                          <div className="line-segments-wrap">
                             {segments.map((seg, si) => {
                               const ch = seg.anchor;
                               const tx = ch
@@ -470,7 +499,13 @@ export const KaraokeStage: React.FC<KaraokeStageProps> = ({
                                       )}
                                     </span>
                                   )}
-                                  <span className="line-segment-text">{seg.segment}</span>
+                                  <span
+                                    className={`line-segment-text ${
+                                      isLineActive ? 'line-active-highlight' : ''
+                                    } ${isLineSung ? 'line-sung' : ''}`}
+                                  >
+                                    {seg.segment}
+                                  </span>
                                 </span>
                               );
                             })}

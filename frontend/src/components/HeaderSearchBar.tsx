@@ -4,6 +4,7 @@ import type { SearchResponse, SearchResultItem, SearchResultType, SessionStage }
 
 interface HeaderSearchBarProps {
   onSelectSong: (item: SearchResultItem) => void;
+  onGoHome: () => void;
   stage: SessionStage;
   activeVideoId: string | null;
 }
@@ -11,14 +12,15 @@ interface HeaderSearchBarProps {
 const STAGE_BADGES: Record<SessionStage, { label: string; tone: string } | null> = {
   idle: null,
   loading_lyrics: { label: 'Syncing Lyrics…', tone: 'badge-amber' },
-  lyrics_ready: { label: 'Extracting Audio & Beats…', tone: 'badge-amber' },
-  chords_fast: { label: 'Fast Chords Ready • Upgrading to Neural…', tone: 'badge-cyan' },
-  chords_neural: { label: 'HD Neural Chords + Synced Lyrics', tone: 'badge-emerald' },
+  lyrics_ready: { label: 'Extracting Audio…', tone: 'badge-amber' },
+  chords_fast: { label: 'Upgrading to Neural…', tone: 'badge-cyan' },
+  chords_neural: { label: 'HD Neural Chords', tone: 'badge-emerald' },
   error: { label: 'Analysis Error', tone: 'badge-rose' },
 };
 
 export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
   onSelectSong,
+  onGoHome,
   stage,
   activeVideoId,
 }) => {
@@ -67,14 +69,22 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
 
   return (
     <header className="studio-header">
-      <div className="brand-lockup">
+      <button
+        type="button"
+        className="brand-lockup"
+        onClick={() => {
+          setOpen(false);
+          onGoHome();
+        }}
+        title="Return to FretFlow Home"
+      >
         <div className="brand-icon">
-          <Guitar size={20} />
+          <Guitar size={19} />
         </div>
         <span className="brand-name">
           Fret<span>Flow</span>
         </span>
-      </div>
+      </button>
 
       <div className="search-shell" ref={wrapperRef}>
         <form onSubmit={handleSubmit} className="search-form">
@@ -86,7 +96,7 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
               if (results.length > 0) setOpen(true);
             }}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search any song, artist, or paste a YouTube URL…"
+            placeholder="Search song, artist, or paste YouTube URL…"
             aria-label="Search songs or YouTube videos"
             className="search-input"
           />
@@ -121,7 +131,7 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
                   {t === 'all' && 'All Results'}
                   {t === 'studio' && (
                     <>
-                      <Disc3 size={13} /> Official Audio (Best Sync)
+                      <Disc3 size={13} /> Official Audio
                     </>
                   )}
                   {t === 'video' && (
@@ -172,10 +182,10 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
                             <span className="result-title">{item.title}</span>
                             <span className={`result-type-pill type-${item.resultType}`}>
                               {item.resultType === 'studio'
-                                ? 'Studio Audio'
+                                ? 'Studio'
                                 : item.resultType === 'live'
-                                  ? 'Live / Cover'
-                                  : 'Music Video'}
+                                  ? 'Live'
+                                  : 'Video'}
                             </span>
                           </div>
                           <div className="result-sub">
@@ -194,8 +204,8 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
         )}
       </div>
 
-      <div className="header-status">
-        {badge && (
+      {badge && (
+        <div className="header-status">
           <span className={`status-pill ${badge.tone}`}>
             {stage === 'chords_neural' ? (
               <Sparkles size={13} />
@@ -204,8 +214,8 @@ export const HeaderSearchBar: React.FC<HeaderSearchBarProps> = ({
             )}
             <span>{badge.label}</span>
           </span>
-        )}
-      </div>
+        </div>
+      )}
     </header>
   );
 };

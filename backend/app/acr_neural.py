@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import threading
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -14,7 +16,13 @@ from .audio import AudioFeatures
 from .guitar_theory import compute_capo_options, estimate_key_label
 from .schemas import ChordsPayload
 
+# Bound intra-op CPU threads so concurrent requests don't thrash cores
+torch.set_num_threads(max(1, (os.cpu_count() or 4) // 2))
+
 CHECKPOINT_PATH = Path(__file__).resolve().parent.parent / "models" / "btc_model_best.pth"
+CHECKPOINT_URL = (
+    "https://raw.githubusercontent.com/ptnghia-j/ChordMini/main/checkpoints/btc_model_best.pth"
+)
 
 
 def _gen_bias_mask(max_length: int) -> torch.Tensor:
@@ -322,6 +330,16 @@ _bundle: Optional[_NeuralChordBundle] = None
 _bundle_lock = threading.Lock()
 
 
+def _ensure_checkpoint_file() -> Path:
+    CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if CHECKPOINT_PATH.is_file() and CHECKPOINT_PATH.stat().st_size > 1_000_000:
+        return CHECKPOINT_PATH
+    tmp_path = CHECKPOINT_PATH.with_suffix(".pth.tmp")
+    urllib.request.urlretrieve(CHECKPOINT_URL, str(tmp_path))
+    tmp_path.replace(CHECKPOINT_PATH)
+    return CHECKPOINT_PATH
+
+
 def _load_bundle() -> _NeuralChordBundle:
     global _bundle
     if _bundle is not None:
@@ -329,7 +347,8 @@ def _load_bundle() -> _NeuralChordBundle:
     with _bundle_lock:
         if _bundle is not None:
             return _bundle
-        ckpt = torch.load(str(CHECKPOINT_PATH), map_location="cpu", weights_only=False)
+        ckpt_file = _ensure_checkpoint_file()
+        ckpt = torch.load(str(ckpt_file), map_location="cpu", weights_only=False)
         state_dict = ckpt.get("model_state_dict", ckpt.get("model", ckpt))
         if state_dict and next(iter(state_dict)).startswith("module."):
             state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
@@ -379,12 +398,24 @@ def _majority_filter(indices: np.ndarray, kernel_size: int = 7) -> np.ndarray:
 def run_neural_chord_recognition(
     features: AudioFeatures, bpm: float, beats_ms: list[int]
 ) -> ChordsPayload:
-    """Pass 2: ChordMini PyTorch BTC 170-chord Transformer with 50% overlap & Gaussian logit smoothing."""
     bundle = _load_bundle()
-    feat = features.log_cqt_frames  # (T, 144)
+    feat = features.log_cqt_frames
     orig_len = int(feat.shape[0])
+    if orig_len == 0:
+        capo_opts, rec_capo = compute_capo_options([])
+        return ChordsPayload(
+            engine="neural_btc_170",
+            bpm=bpm,
+            beatsMs=beats_ms,
+            detectedKey="C Major",
+            events=[],
+            capoOptions=capo_opts,
+            recommendedCapo=rec_capo,
+            uniqueChords=[],
+        )
+
     seq_len = 108
-    stride = 54  # 50% window overlap
+    stride = 54
 
     rem = orig_len % seq_len
     padded = np.pad(feat, ((0, 0 if rem == 0 else seq_len - rem), (0, 0)), mode="constant")

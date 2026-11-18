@@ -3,7 +3,7 @@ from __future__ import annotations
 import librosa
 import numpy as np
 
-from .audio import HOP_LENGTH, AudioFeatures
+from .audio import AudioFeatures
 from .guitar_theory import (
     MAJOR_ROOT_NAMES,
     compute_capo_options,
@@ -19,13 +19,13 @@ def _build_chord_templates() -> tuple[np.ndarray, list[str]]:
     labels: list[str] = []
 
     specs = [
-        ("maj", [(0, 1.0), (4, 0.88), (7, 0.92)], 0.0),
-        ("min", [(0, 1.0), (3, 0.90), (7, 0.92)], 0.0),
-        ("7", [(0, 1.0), (4, 0.82), (7, 0.85), (10, 0.72)], -0.045),
-        ("min7", [(0, 1.0), (3, 0.84), (7, 0.85), (10, 0.72)], -0.045),
+        ("maj", [(0, 1.0), (4, 0.88), (7, 0.92)]),
+        ("min", [(0, 1.0), (3, 0.90), (7, 0.92)]),
+        ("7", [(0, 1.0), (4, 0.82), (7, 0.85), (10, 0.72)]),
+        ("min7", [(0, 1.0), (3, 0.84), (7, 0.85), (10, 0.72)]),
     ]
 
-    for qual, intervals, _ in specs:
+    for qual, intervals in specs:
         for pc in range(12):
             vec = np.zeros(12, dtype=np.float32)
             for ivl, weight in intervals:
@@ -35,7 +35,6 @@ def _build_chord_templates() -> tuple[np.ndarray, list[str]]:
             root_name = MAJOR_ROOT_NAMES[pc]
             labels.append(root_name if qual == "maj" else f"{root_name}:{qual}")
 
-    # Uniform low-energy / No-chord template
     nc = np.ones(12, dtype=np.float32) / np.sqrt(12.0)
     templates.append(nc)
     labels.append("N")
@@ -45,7 +44,7 @@ def _build_chord_templates() -> tuple[np.ndarray, list[str]]:
 _TEMPLATES, _STATE_LABELS = _build_chord_templates()
 
 
-def _viterbi_decode(log_obs: np.ndarray, stay_prob: float = 0.94) -> np.ndarray:
+def _viterbi_decode(log_obs: np.ndarray, stay_prob: float = 0.88) -> np.ndarray:
     """Vectorized log-space Viterbi decoder over (T, K) observation scores."""
     num_frames, num_states = log_obs.shape
     if num_frames == 0:
@@ -61,7 +60,7 @@ def _viterbi_decode(log_obs: np.ndarray, stay_prob: float = 0.94) -> np.ndarray:
     dp = log_obs[0].copy()
 
     for t in range(1, num_frames):
-        scores = dp[:, None] + trans  # (prev_state, next_state)
+        scores = dp[:, None] + trans
         best_prev = np.argmax(scores, axis=0)
         backptr[t] = best_prev
         dp = scores[best_prev, np.arange(num_states)] + log_obs[t]
@@ -98,7 +97,6 @@ def frames_to_smoothed_events(
     conf_last = float(np.mean(frame_confidences[start_idx:])) if frame_confidences.size > start_idx else 0.85
     raw_segs.append([start_idx * frame_duration, len(frame_labels) * frame_duration, cur_lbl, conf_last])
 
-    # Absorb transient blips shorter than min_segment_sec into neighbors
     merged: list[list] = []
     for seg in raw_segs:
         dur = seg[1] - seg[0]
@@ -147,7 +145,6 @@ def frames_to_smoothed_events(
             )
         )
 
-    # Coalesce adjacent identical displays after beat snapping
     coalesced: list[ChordEvent] = []
     for ev in events:
         if coalesced and coalesced[-1].display == ev.display and abs(ev.startMs - coalesced[-1].endMs) <= 80:
@@ -168,7 +165,6 @@ def extract_beats(features: AudioFeatures) -> tuple[float, list[int]]:
     bpm_val = float(np.atleast_1d(tempo)[0]) if tempo is not None else 120.0
     if bpm_val <= 0:
         bpm_val = 120.0
-    # Normalize half/double-time outliers into natural guitar strumming range (72..165 BPM)
     while bpm_val < 68.0:
         bpm_val *= 2.0
     while bpm_val > 176.0:
@@ -182,36 +178,53 @@ def extract_beats(features: AudioFeatures) -> tuple[float, list[int]]:
 def run_fast_chord_recognition(
     features: AudioFeatures, bpm: float, beats_ms: list[int]
 ) -> ChordsPayload:
-    """Fast (~0.4s) tuning-compensated CQT Chroma + Viterbi HMM chord recognizer."""
+    """Fast (~0.4s) tuning-compensated, broadband-floor-cleaned CQT Chroma + Viterbi HMM recognizer."""
     cqt_mag = features.cqt_mag  # (144, T), 24 bins/octave starting at C1
     num_frames = cqt_mag.shape[1]
+    if num_frames == 0:
+        capo_opts, rec_capo = compute_capo_options([])
+        return ChordsPayload(
+            engine="fast_cqt_hmm",
+            bpm=bpm,
+            beatsMs=beats_ms,
+            detectedKey="C Major",
+            events=[],
+            capoOptions=capo_opts,
+            recommendedCapo=rec_capo,
+            uniqueChords=[],
+        )
 
-    # Compensate non-440Hz recordings (e.g. Oasis Wonderwall +30 cents)
     try:
-        tuning = float(librosa.estimate_tuning(S=cqt_mag, bins_per_octave=24))
+        tuning = float(librosa.estimate_tuning(y=features.samples, sr=features.sr, bins_per_octave=12))
     except Exception:
         tuning = 0.0
     bin_shift = int(round(tuning * 2.0))
     shifted = np.roll(cqt_mag, -bin_shift, axis=0)
 
-    # Fold 6 octaves x 12 pitch classes x 2 half-semitone bins -> (12, T)
-    # Weight bass/mid guitar octaves C2..B5 slightly stronger than sub-bass/hiss
-    oct_weights = np.array([0.65, 1.15, 1.25, 1.15, 0.90, 0.55], dtype=np.float32)[:, None, None, None]
-    folded = (shifted.reshape(6, 12, 2, num_frames) * oct_weights).mean(axis=(0, 2))  # (12, T)
+    # Symmetric semitone-centered folding around exact 2*p bins
+    center = shifted[0::2]
+    left = np.roll(shifted, 1, axis=0)[0::2]
+    right = shifted[1::2]
+    semitone_energy = 0.60 * center + 0.20 * left + 0.20 * right  # (72, T)
 
+    oct_weights = np.array([0.65, 1.15, 1.25, 1.15, 0.90, 0.55], dtype=np.float32)[:, None, None]
+    folded = (semitone_energy.reshape(6, 12, num_frames) * oct_weights).mean(axis=0)  # (12, T)
+
+    # Subtract broadband percussive/drum floor so active frames don't collapse to uniform 'N'
     frame_energy = np.linalg.norm(folded, axis=0)
-    energy_thresh = float(np.percentile(frame_energy, 8)) * 0.45 if num_frames > 0 else 0.0
-    chroma_norm = (folded / (frame_energy[None, :] + 1e-8)).T  # (T, 12)
+    energy_thresh = float(np.percentile(frame_energy, 8)) * 0.55
+    floor = np.percentile(folded, 35, axis=0, keepdims=True)
+    cleaned = np.maximum(0.0, folded - floor)
+    chroma_norm = (cleaned / (np.linalg.norm(cleaned, axis=0, keepdims=True) + 1e-8)).T  # (T, 12)
 
     sim = chroma_norm @ _TEMPLATES.T  # (T, 49)
-    # Slight complexity prior so 7th chords require clear 7th presence
     sim[:, 24:48] -= 0.038
-    # Boost No-Chord on near-silent frames
     silent_mask = frame_energy < energy_thresh
-    sim[silent_mask, 48] += 0.35
+    sim[~silent_mask, 48] -= 0.15
+    sim[silent_mask, 48] += 0.65
 
     log_obs = sim * 18.0
-    state_seq = _viterbi_decode(log_obs, stay_prob=0.80)
+    state_seq = _viterbi_decode(log_obs, stay_prob=0.88)
 
     probs = np.exp(log_obs - np.max(log_obs, axis=1, keepdims=True))
     probs /= np.sum(probs, axis=1, keepdims=True) + 1e-8

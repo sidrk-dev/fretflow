@@ -26,10 +26,22 @@ const OPEN_VOICINGS: Record<string, GuitarVoicing[]> = {
     { frets: [-1, -1, 0, 2, 1, 2], fingers: [0, 0, 0, 2, 1, 3], baseFret: 1, label: 'Open D7' },
   ],
   '2:maj7': [
-    { frets: [-1, -1, 0, 2, 2, 2], fingers: [0, 0, 0, 1, 1, 1], baseFret: 1, barres: [{ fret: 2, fromString: 3, toString: 5 }], label: 'Open Dmaj7' },
+    {
+      frets: [-1, -1, 0, 2, 2, 2],
+      fingers: [0, 0, 0, 1, 1, 1],
+      baseFret: 1,
+      barres: [{ fret: 2, fromString: 3, toString: 5 }],
+      label: 'Open Dmaj7',
+    },
   ],
   '2:min7': [
-    { frets: [-1, -1, 0, 2, 1, 1], fingers: [0, 0, 0, 2, 1, 1], baseFret: 1, barres: [{ fret: 1, fromString: 4, toString: 5 }], label: 'Open Dm7' },
+    {
+      frets: [-1, -1, 0, 2, 1, 1],
+      fingers: [0, 0, 0, 2, 1, 1],
+      baseFret: 1,
+      barres: [{ fret: 1, fromString: 4, toString: 5 }],
+      label: 'Open Dm7',
+    },
   ],
   '2:sus4': [
     { frets: [-1, -1, 0, 2, 3, 3], fingers: [0, 0, 0, 1, 2, 3], baseFret: 1, label: 'Open Dsus4' },
@@ -122,31 +134,58 @@ const OPEN_VOICINGS: Record<string, GuitarVoicing[]> = {
   ],
 };
 
+interface BarreShapeSpec {
+  rel: [number | null, number | null, number | null, number | null, number | null, number | null];
+  fingers: [number, number, number, number, number, number];
+  barre?: [number, number, number]; // [fromString, toString, relFretOffset]
+}
+
+const E_BARRE_SHAPES: Record<string, BarreShapeSpec> = {
+  maj:     { rel: [0, 2, 2, 1, 0, 0],          fingers: [1, 3, 4, 2, 1, 1], barre: [0, 5, 0] },
+  min:     { rel: [0, 2, 2, 0, 0, 0],          fingers: [1, 3, 4, 1, 1, 1], barre: [0, 5, 0] },
+  '7':     { rel: [0, 2, 0, 1, 0, 0],          fingers: [1, 3, 1, 2, 1, 1], barre: [0, 5, 0] },
+  min7:    { rel: [0, 2, 0, 0, 0, 0],          fingers: [1, 3, 1, 1, 1, 1], barre: [0, 5, 0] },
+  maj7:    { rel: [0, null, 1, 1, 0, null],    fingers: [1, 0, 3, 4, 2, 0] },
+  minmaj7: { rel: [0, 2, 1, 0, 0, 0],          fingers: [1, 3, 2, 1, 1, 1], barre: [0, 5, 0] },
+  sus4:    { rel: [0, 2, 2, 2, 0, 0],          fingers: [1, 2, 3, 4, 1, 1], barre: [0, 5, 0] },
+  sus2:    { rel: [0, 2, 2, -1, null, null],   fingers: [2, 3, 4, 1, 0, 0] },
+  maj6:    { rel: [0, null, 2, 1, 2, null],    fingers: [1, 0, 3, 2, 4, 0] },
+  '6':     { rel: [0, null, 2, 1, 2, null],    fingers: [1, 0, 3, 2, 4, 0] },
+  min6:    { rel: [0, null, 2, 0, 2, null],    fingers: [1, 0, 3, 1, 4, 0] },
+  dim:     { rel: [0, 1, 2, 0, null, null],    fingers: [1, 2, 3, 1, 0, 0] },
+  dim7:    { rel: [0, null, -1, 0, -1, null],  fingers: [3, 0, 1, 4, 2, 0] },
+  hdim7:   { rel: [0, null, 0, 0, -1, null],   fingers: [2, 0, 3, 4, 1, 0] },
+  aug:     { rel: [0, null, 2, 1, 1, null],    fingers: [1, 0, 4, 2, 3, 0] },
+  aug7:    { rel: [0, null, 0, 1, 1, null],    fingers: [1, 0, 2, 3, 4, 0] },
+  '5':     { rel: [0, 2, 2, null, null, null], fingers: [1, 3, 4, 0, 0, 0] },
+};
+
+const A_BARRE_SHAPES: Record<string, BarreShapeSpec> = {
+  maj:     { rel: [null, 0, 2, 2, 2, 0],       fingers: [0, 1, 2, 3, 4, 1], barre: [1, 5, 0] },
+  min:     { rel: [null, 0, 2, 2, 1, 0],       fingers: [0, 1, 3, 4, 2, 1], barre: [1, 5, 0] },
+  '7':     { rel: [null, 0, 2, 0, 2, 0],       fingers: [0, 1, 3, 1, 4, 1], barre: [1, 5, 0] },
+  min7:    { rel: [null, 0, 2, 0, 1, 0],       fingers: [0, 1, 3, 1, 2, 1], barre: [1, 5, 0] },
+  maj7:    { rel: [null, 0, 2, 1, 2, 0],       fingers: [0, 1, 3, 2, 4, 1], barre: [1, 5, 0] },
+  minmaj7: { rel: [null, 0, 2, 1, 1, 0],       fingers: [0, 1, 4, 2, 3, 1], barre: [1, 5, 0] },
+  sus4:    { rel: [null, 0, 2, 2, 3, 0],       fingers: [0, 1, 2, 3, 4, 1], barre: [1, 5, 0] },
+  sus2:    { rel: [null, 0, 2, 2, 0, 0],       fingers: [0, 1, 3, 4, 1, 1], barre: [1, 5, 0] },
+  maj6:    { rel: [null, 0, 2, 2, 2, 2],       fingers: [0, 1, 3, 3, 3, 3], barre: [2, 5, 2] },
+  '6':     { rel: [null, 0, 2, 2, 2, 2],       fingers: [0, 1, 3, 3, 3, 3], barre: [2, 5, 2] },
+  min6:    { rel: [null, 0, 2, -1, 1, null],   fingers: [0, 2, 4, 1, 3, 0] },
+  hdim7:   { rel: [null, 0, 1, 0, 1, null],    fingers: [0, 1, 3, 2, 4, 0] },
+  dim7:    { rel: [null, 0, 1, -1, 1, null],   fingers: [0, 2, 3, 1, 4, 0] },
+  dim:     { rel: [null, 0, 1, 2, 1, null],    fingers: [0, 1, 2, 4, 3, 0] },
+  aug:     { rel: [null, 0, 3, 2, 2, null],    fingers: [0, 1, 4, 2, 3, 0] },
+  aug7:    { rel: [null, 0, 3, 0, 2, null],    fingers: [0, 1, 4, 1, 3, 0] },
+  '5':     { rel: [null, 0, 2, 2, null, null], fingers: [0, 1, 3, 4, 0, 0] },
+};
+
 function buildEShapeBarre(rootPc: number, quality: string): GuitarVoicing {
-  // Low E string is pitch class 4
   let fret = (rootPc - 4 + 12) % 12;
   if (fret === 0) fret = 12;
 
-  const offsets: Record<string, [number, number, number, number, number, number]> = {
-    maj: [0, 2, 2, 1, 0, 0],
-    min: [0, 2, 2, 0, 0, 0],
-    '7': [0, 2, 0, 1, 0, 0],
-    min7: [0, 2, 0, 0, 0, 0],
-    maj7: [0, -1, 1, 1, 0, -1],
-    sus4: [0, 2, 2, 2, 0, 0],
-    sus2: [0, 2, 4, 4, 0, 0],
-    maj6: [0, -1, 2, 1, 2, -1],
-    '6': [0, -1, 2, 1, 2, -1],
-    min6: [0, -1, 2, 0, 2, -1],
-    dim: [0, -1, 2, 0, -1, -1],
-    dim7: [0, -1, -1, 0, -1, -1],
-    hdim7: [0, -1, 0, 0, -1, -1],
-    aug: [0, -1, 2, 1, 1, -1],
-    '5': [0, 2, 2, -1, -1, -1],
-  };
-
-  const rel = offsets[quality] ?? offsets.maj;
-  const frets = rel.map((r) => (r < 0 ? -1 : fret + r)) as [
+  const spec = E_BARRE_SHAPES[quality] ?? E_BARRE_SHAPES.maj;
+  const frets = spec.rel.map((r) => (r === null ? -1 : fret + r)) as [
     number,
     number,
     number,
@@ -154,43 +193,35 @@ function buildEShapeBarre(rootPc: number, quality: string): GuitarVoicing {
     number,
     number,
   ];
-  const fingers: [number, number, number, number, number, number] = [1, 3, 4, 2, 1, 1];
-  const hasFullBarre = rel[4] === 0 && rel[5] === 0;
+  const fingers = frets.map((f, i) => (f <= 0 ? 0 : spec.fingers[i])) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const pos = frets.filter((f) => f > 0);
+  const minF = pos.length ? Math.min(...pos) : 1;
 
   return {
     frets,
     fingers,
-    baseFret: fret,
-    barres: hasFullBarre ? [{ fret, fromString: 0, toString: 5 }] : undefined,
+    baseFret: minF,
+    barres:
+      spec.barre && fret + spec.barre[2] > 0
+        ? [{ fret: fret + spec.barre[2], fromString: spec.barre[0], toString: spec.barre[1] }]
+        : undefined,
     label: `E-Shape (Fret ${fret})`,
   };
 }
 
 function buildAShapeBarre(rootPc: number, quality: string): GuitarVoicing {
-  // A string (5th) is pitch class 9
   let fret = (rootPc - 9 + 12) % 12;
   if (fret === 0) fret = 12;
 
-  const offsets: Record<string, [number, number, number, number, number, number]> = {
-    maj: [-1, 0, 2, 2, 2, 0],
-    min: [-1, 0, 2, 2, 1, 0],
-    '7': [-1, 0, 2, 0, 2, 0],
-    min7: [-1, 0, 2, 0, 1, 0],
-    maj7: [-1, 0, 2, 1, 2, 0],
-    sus4: [-1, 0, 2, 2, 3, 0],
-    sus2: [-1, 0, 2, 2, 0, 0],
-    maj6: [-1, 0, 2, 2, 2, 2],
-    '6': [-1, 0, 2, 2, 2, 2],
-    min6: [-1, 0, 2, 0, 1, 2],
-    hdim7: [-1, 0, 1, 0, 1, -1],
-    dim7: [-1, 0, 1, -1, 0, -1],
-    dim: [-1, 0, 1, 2, 1, -1],
-    aug: [-1, 0, 3, 2, 2, -1],
-    '5': [-1, 0, 2, 2, -1, -1],
-  };
-
-  const rel = offsets[quality] ?? offsets.maj;
-  const frets = rel.map((r) => (r < 0 ? -1 : fret + r)) as [
+  const spec = A_BARRE_SHAPES[quality] ?? A_BARRE_SHAPES.maj;
+  const frets = spec.rel.map((r) => (r === null ? -1 : fret + r)) as [
     number,
     number,
     number,
@@ -198,14 +229,25 @@ function buildAShapeBarre(rootPc: number, quality: string): GuitarVoicing {
     number,
     number,
   ];
-  const fingers: [number, number, number, number, number, number] = [0, 1, 3, 3, 3, 1];
-  const hasBarre = rel[5] === 0;
+  const fingers = frets.map((f, i) => (f <= 0 ? 0 : spec.fingers[i])) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const pos = frets.filter((f) => f > 0);
+  const minF = pos.length ? Math.min(...pos) : 1;
 
   return {
     frets,
     fingers,
-    baseFret: fret,
-    barres: hasBarre ? [{ fret, fromString: 1, toString: 5 }] : undefined,
+    baseFret: minF,
+    barres:
+      spec.barre && fret + spec.barre[2] > 0
+        ? [{ fret: fret + spec.barre[2], fromString: spec.barre[0], toString: spec.barre[1] }]
+        : undefined,
     label: `A-Shape (Fret ${fret})`,
   };
 }
@@ -218,14 +260,12 @@ export function getGuitarVoicings(rootPc: number, quality: string): GuitarVoicin
   const eBarre = buildEShapeBarre(rpc, quality);
   const aBarre = buildAShapeBarre(rpc, quality);
 
-  // Order lower-fret barre shape first for easier reach
   const barres = eBarre.baseFret <= aBarre.baseFret ? [eBarre, aBarre] : [aBarre, eBarre];
   return [...openList, ...barres];
 }
 
-// WebAudio Acoustic Guitar Chord Preview Strummer
 let sharedAudioCtx: AudioContext | null = null;
-const OPEN_STRING_MIDI = [40, 45, 50, 55, 59, 64]; // E2, A2, D3, G3, B3, E4
+const OPEN_STRING_MIDI = [40, 45, 50, 55, 59, 64];
 
 export function strumGuitarVoicing(voicing: GuitarVoicing, capoFret = 0): void {
   try {

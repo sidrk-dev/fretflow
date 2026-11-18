@@ -1,0 +1,42 @@
+name: FretFlow CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install FFmpeg & libsndfile
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install Backend Dependencies
+        working-directory: backend
+        run: uv sync --frozen --dev
+      - name: Run Pytest Suite
+        working-directory: backend
+        run: PYTHONPATH=. uv run pytest -v -k "not live"
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install & Build Frontend
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build

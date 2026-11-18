@@ -4,6 +4,8 @@ import re
 from collections import defaultdict
 from typing import Optional
 
+import numpy as np
+
 from .schemas import CapoOption, ChordEvent
 
 MAJOR_ROOT_NAMES = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
@@ -54,6 +56,11 @@ INTERVAL_SEMITONES: dict[str, int] = {
     "4": 5, "#4": 6, "b5": 6, "5": 7, "#5": 8, "b6": 8,
     "6": 9, "bb7": 9, "b7": 10, "7": 11,
 }
+
+_MAJ_PROFILE = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+_MIN_PROFILE = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+_MAJ_Z = (_MAJ_PROFILE - _MAJ_PROFILE.mean()) / _MAJ_PROFILE.std()
+_MIN_Z = (_MIN_PROFILE - _MIN_PROFILE.mean()) / _MIN_PROFILE.std()
 
 
 def format_guitar_chord(root_pc: int, quality: str, bass_pc: Optional[int] = None) -> str:
@@ -125,7 +132,6 @@ def parse_harte_chord(label: str) -> Optional[tuple[int, str, Optional[int], str
 
 
 def _chord_ergonomic_weight(shape_pc: int, quality: str) -> tuple[float, bool]:
-    """Return (0.0..1.0 ergonomic score, is_open_campfire_shape)."""
     is_minor = quality in MINOR_LIKE_QUALITIES
     if not is_minor and shape_pc in OPEN_MAJOR_PCS:
         if quality in ("dim", "dim7", "aug", "aug7"):
@@ -136,53 +142,73 @@ def _chord_ergonomic_weight(shape_pc: int, quality: str) -> tuple[float, bool]:
             return 0.50, False
         return 1.0, True
 
-    # Semi-open / common manageable shapes on guitar
-    if shape_pc == 5 and quality == "maj7":  # Fmaj7
+    if shape_pc == 5 and quality == "maj7":
         return 0.82, True
-    if shape_pc == 11 and quality == "7":    # B7 open 5-string shape
+    if shape_pc == 11 and quality == "7":
         return 0.78, True
-    if shape_pc == 11 and quality in ("min", "min7"):  # Bm / Bm7
+    if shape_pc == 11 and quality in ("min", "min7"):
         return 0.58, False
-    if shape_pc == 5 and not is_minor:       # F major
+    if shape_pc == 5 and not is_minor:
         return 0.52, False
-    if shape_pc in (6, 1) and is_minor:      # F#m / C#m
+    if shape_pc in (6, 1) and is_minor:
         return 0.35, False
 
-    # Heavy barre / awkward accidental shapes (Bb, Eb, Ab, F#, G#m, Ebm, Bbm...)
     return 0.12, False
 
 
 def estimate_key_label(events: list[ChordEvent], transpose_semitones: int = 0) -> str:
+    """Z-scored Pearson Krumhansl-Schmuckler key estimation with exact triad/sus/dim/aug intervals."""
     if not events:
         return "C Major"
-    major_profile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
-    minor_profile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
 
-    chroma = [0.0] * 12
+    chroma = np.zeros(12, dtype=np.float64)
     for ev in events:
         dur = max(0.05, (ev.endMs - ev.startMs) / 1000.0)
         rpc = (ev.rootPc + transpose_semitones) % 12
         chroma[rpc] += dur * 1.5
-        third = 3 if ev.quality in MINOR_LIKE_QUALITIES else 4
-        chroma[(rpc + third) % 12] += dur * 1.0
-        chroma[(rpc + 7) % 12] += dur * 0.8
+        q = ev.quality
+        if q == "sus2":
+            chroma[(rpc + 2) % 12] += dur * 0.8
+            chroma[(rpc + 7) % 12] += dur * 0.8
+        elif q == "sus4":
+            chroma[(rpc + 5) % 12] += dur * 0.8
+            chroma[(rpc + 7) % 12] += dur * 0.8
+        elif q == "5":
+            chroma[(rpc + 7) % 12] += dur * 0.9
+        elif q in ("dim", "dim7", "hdim7"):
+            chroma[(rpc + 3) % 12] += dur * 1.0
+            chroma[(rpc + 6) % 12] += dur * 0.8
+        elif q in ("aug", "aug7"):
+            chroma[(rpc + 4) % 12] += dur * 1.0
+            chroma[(rpc + 8) % 12] += dur * 0.8
+        else:
+            third = 3 if q in MINOR_LIKE_QUALITIES else 4
+            chroma[(rpc + third) % 12] += dur * 1.0
+            chroma[(rpc + 7) % 12] += dur * 0.8
+
+    c_std = float(chroma.std())
+    if c_std < 1e-8:
+        return "C Major"
+    c_norm = (chroma - chroma.mean()) / c_std
 
     best_score = -1e9
     best_label = "C Major"
     for pc in range(12):
-        maj_s = sum(chroma[(pc + i) % 12] * major_profile[i] for i in range(12))
+        rot = np.roll(c_norm, -pc)
+        maj_s = float(np.dot(rot, _MAJ_Z))
         if maj_s > best_score:
             best_score = maj_s
             best_label = f"{MAJOR_ROOT_NAMES[pc]} Major"
-        min_s = sum(chroma[(pc + i) % 12] * minor_profile[i] for i in range(12))
+        min_s = float(np.dot(rot, _MIN_Z))
         if min_s > best_score:
             best_score = min_s
             best_label = f"{MINOR_ROOT_NAMES[pc]} Minor"
     return best_label
 
 
-def compute_capo_options(events: list[ChordEvent], max_fret: int = 7) -> tuple[list[CapoOption], int]:
-    """Evaluate Capo frets 0..max_fret and pick the best guitar playability recommendation."""
+def compute_capo_options(
+    events: list[ChordEvent], max_fret: int = 7
+) -> tuple[list[CapoOption], int]:
     if not events:
         default_opt = CapoOption(
             capoFret=0,
@@ -215,7 +241,6 @@ def compute_capo_options(events: list[ChordEvent], max_fret: int = 7) -> tuple[l
 
         raw_ratio = weighted_sum / max(1.0, float(total_dur))
         open_ratio = open_dur / max(1.0, float(total_dur))
-        # Small preference for lower capo frets so Capo 0 wins unless a capo genuinely unlocks open chords
         fret_penalty = (0.03 if fret > 0 else 0.0) + (0.012 * fret)
         final_score = round(max(0.0, min(100.0, (raw_ratio - fret_penalty) * 100.0)), 1)
 
@@ -237,7 +262,6 @@ def compute_capo_options(events: list[ChordEvent], max_fret: int = 7) -> tuple[l
 
     best = max(options, key=lambda o: o.score)
     capo0 = options[0]
-    # Only recommend a non-zero capo if it improves playability meaningfully (+10 pts over Capo 0)
     recommended_fret = best.capoFret if (best.score - capo0.score >= 10.0) else 0
     for opt in options:
         opt.isRecommended = opt.capoFret == recommended_fret

@@ -10,10 +10,39 @@ from .schemas import (
     LyricLine,
     LyricsPayload,
     LyricWord,
+    SkipSegment,
     SongSection,
 )
+from .sponsorblock import merge_skip_segments
 
 INSTRUMENTAL_GAP_THRESHOLD_MS = 4500
+
+
+def map_studio_to_video_ms(
+    studio_ms: int,
+    auto_offset_ms: int,
+    manual_offset_ms: int,
+    skip_segments: Optional[list[SkipSegment]] = None,
+    video_duration_ms: int = 0,
+) -> int:
+    """
+    Map a studio-master timestamp to YouTube video timestamp:
+    - Applies intro offset + mid-video non-music dialogue skits (piecewise cumulative SponsorBlock shift)
+    - Excludes outro skits near the end of the video
+    - Applies guitarist manual_offset_ms
+    """
+    if not skip_segments:
+        return studio_ms + auto_offset_ms + manual_offset_ms
+
+    merged = merge_skip_segments(skip_segments)
+    pos = studio_ms
+    for seg in merged:
+        # Ignore trailing outro skits (starting in the final 15% of a known video duration and > 60s)
+        if video_duration_ms > 60_000 and seg.startMs > video_duration_ms * 0.85 and seg.endMs >= video_duration_ms - 5000:
+            continue
+        if pos >= seg.startMs - 500:
+            pos += seg.endMs - seg.startMs
+    return pos + manual_offset_ms
 
 
 def _build_instrumental_section(
@@ -61,14 +90,19 @@ def _build_instrumental_section(
 def _anchor_chords_to_line(
     line: LyricLine, events: list[ChordEvent], next_line_start_ms: Optional[int]
 ) -> list[ChordAnchor]:
-    """Attach chord events occurring just before or during a lyric line to specific words or character offsets."""
-    window_start = line.startMs - 280
+    """Attach chord events occurring just before (pickup) or during a lyric line to words/characters."""
+    pickup_start = max(0, line.startMs - 240)
     window_end = line.endMs
-    if next_line_start_ms is not None and (next_line_start_ms - line.endMs) < INSTRUMENTAL_GAP_THRESHOLD_MS:
-        window_end = max(line.endMs, min(next_line_start_ms - 250, line.endMs + 2200))
+    if (
+        next_line_start_ms is not None
+        and (next_line_start_ms - line.endMs) < INSTRUMENTAL_GAP_THRESHOLD_MS
+    ):
+        window_end = max(line.endMs, min(next_line_start_ms - 240, line.endMs + 3200))
 
     overlapping = [
-        ev for ev in events if ev.endMs > line.startMs + 80 and ev.startMs < window_end
+        ev
+        for ev in events
+        if ev.endMs > line.startMs + 80 and ev.startMs < window_end and ev.endMs > pickup_start
     ]
     if not overlapping:
         return []
@@ -83,7 +117,6 @@ def _anchor_chords_to_line(
         char_offset: Optional[int] = None
 
         if line.words:
-            # Find the word active at eff_start or the closest upcoming word
             best_w = 0
             best_dist = 10**9
             for wi, w in enumerate(line.words):
@@ -95,25 +128,29 @@ def _anchor_chords_to_line(
                 if dist < best_dist:
                     best_dist = dist
                     best_w = wi
-            # Avoid stacking two chords on the exact same word index if possible
+            # Snap to the start of a visual word (don't attach mid-word on syllable #2 if syllable #1 didn't end with space)
+            while best_w > 0 and not line.words[best_w - 1].text.endswith((" ", "\t", "-")):
+                best_w -= 1
             if anchors and anchors[-1].wordIndex == best_w and best_w + 1 < len(line.words):
-                best_w += 1
+                # Advance to next whole-word boundary if available
+                cand = best_w + 1
+                while cand < len(line.words) and not line.words[cand - 1].text.endswith((" ", "\t", "-")):
+                    cand += 1
+                if cand < len(line.words):
+                    best_w = cand
             word_idx = best_w
 
-        # Also compute proportional charOffset for clean chord-above-lyric spacing
         if ev.startMs <= line.startMs + 120 and idx == 0:
             char_offset = 0
         else:
             frac = min(1.0, max(0.0, (eff_start - line.startMs) / float(line_span)))
             raw_char = int(round(frac * (text_len - 1)))
-            # Snap to nearest word boundary in line.text so chord sits at start of a word
             while raw_char > 0 and line.text[raw_char - 1] not in (" ", "\t", "-"):
                 raw_char -= 1
             if anchors and anchors[-1].charOffset is not None and raw_char <= anchors[-1].charOffset + 3:
                 raw_char = min(text_len, (anchors[-1].charOffset or 0) + 5)
             char_offset = raw_char
 
-        # Deduplicate back-to-back identical chord displays on the same line
         if anchors and anchors[-1].display == ev.display:
             anchors[-1].endMs = ev.endMs
             continue
@@ -140,21 +177,24 @@ def align_lyrics_and_chords(
     chords: Optional[ChordsPayload],
     total_offset_ms: int = 0,
     song_duration_ms: int = 0,
+    skip_segments: Optional[list[SkipSegment]] = None,
+    auto_offset_ms: Optional[int] = None,
+    manual_offset_ms: Optional[int] = None,
 ) -> list[SongSection]:
     """
     Produce a complete timeline of SongSections combining:
-    - Shifted synced lyrics (`studio_ms + total_offset_ms`)
-    - Chords snapped directly above lyric words/characters
-    - `[Intro]`, `[Instrumental]`, and `[Outro]` chord-bar sections during non-vocal passages
+    - Piecewise SponsorBlock + manual offset shifted lyrics
+    - Chords snapped onto whole-word boundaries (never splitting syllabic TTML words)
+    - `[Intro]`, `[Instrumental / Solo]`, and `[Outro]` chord bars
     """
+    bounded_dur_ms = max(0, min(int(song_duration_ms), 3_600_000))
     events = chords.events if chords else []
     bpm = chords.bpm if chords else 120.0
 
-    # Instrumental-only or missing lyrics: group entire song into clean 8-bar sections
     if not lyrics or not lyrics.sections or lyrics.source == "none":
         if not events:
             return []
-        end_ms = max(song_duration_ms, events[-1].endMs)
+        end_ms = min(3_600_000, max(bounded_dur_ms, events[-1].endMs))
         chunk_ms = 24_000
         inst_sections: list[SongSection] = []
         idx = 1
@@ -172,26 +212,45 @@ def align_lyrics_and_chords(
                 idx += 1
         return inst_sections
 
-    # Shift all lyric lines & words by total_offset_ms (only if lyrics are time-synced)
-    shift = total_offset_ms if lyrics.hasLineSync else 0
+    eff_auto = auto_offset_ms if auto_offset_ms is not None else total_offset_ms
+    eff_manual = manual_offset_ms if manual_offset_ms is not None else 0
+
+    def _shift_ts(ms: int) -> int:
+        if not lyrics.hasLineSync:
+            return ms
+        if skip_segments:
+            return map_studio_to_video_ms(ms, eff_auto, eff_manual, skip_segments, bounded_dur_ms)
+        return ms + total_offset_ms
+
     shifted_sections: list[SongSection] = []
     all_shifted_lines: list[LyricLine] = []
 
     for sec in lyrics.sections:
         s_lines: list[LyricLine] = []
         for ln in sec.lines:
-            s_words = [
-                LyricWord(
-                    text=w.text,
-                    startMs=max(0, w.startMs + shift),
-                    endMs=max(80, w.endMs + shift),
-                )
-                for w in ln.words
-            ]
+            raw_l_start = _shift_ts(ln.startMs)
+            raw_l_end = _shift_ts(ln.endMs)
+            # If negative manual offset pushed the entire line before 0:00, skip piling onto 0ms
+            if lyrics.hasLineSync and raw_l_end <= 0:
+                continue
+
+            l_start = max(0, raw_l_start)
+            l_end = max(l_start + 180, raw_l_end)
+
+            s_words: list[LyricWord] = []
+            for w in ln.words:
+                rw_s = _shift_ts(w.startMs)
+                rw_e = _shift_ts(w.endMs)
+                if rw_e <= 0:
+                    s_words.append(LyricWord(text=w.text, startMs=0, endMs=0))
+                else:
+                    ws = max(0, rw_s)
+                    s_words.append(LyricWord(text=w.text, startMs=ws, endMs=max(ws + 60, rw_e)))
+
             new_ln = LyricLine(
                 id=ln.id,
-                startMs=max(0, ln.startMs + shift),
-                endMs=max(200, ln.endMs + shift),
+                startMs=l_start,
+                endMs=l_end,
                 text=ln.text,
                 words=s_words,
                 chords=[],
@@ -217,7 +276,6 @@ def align_lyrics_and_chords(
     if not events or not lyrics.hasLineSync:
         return shifted_sections
 
-    # Anchor chords onto every shifted lyric line
     for global_i, ln in enumerate(all_shifted_lines):
         next_start = (
             all_shifted_lines[global_i + 1].startMs
@@ -226,7 +284,6 @@ def align_lyrics_and_chords(
         )
         ln.chords = _anchor_chords_to_line(ln, events, next_start)
 
-    # Interleave [Intro], [Instrumental], and [Outro] chord-bar sections for non-vocal gaps
     output: list[SongSection] = []
     first_vocal_ms = shifted_sections[0].startMs
     if first_vocal_ms >= INSTRUMENTAL_GAP_THRESHOLD_MS:
@@ -245,11 +302,13 @@ def align_lyrics_and_chords(
     for idx, sec in enumerate(shifted_sections):
         if idx > 0:
             prev_end = shifted_sections[idx - 1].endMs
-            if sec.startMs - prev_end >= INSTRUMENTAL_GAP_THRESHOLD_MS + 1500:
+            if sec.startMs - prev_end >= INSTRUMENTAL_GAP_THRESHOLD_MS + 1000:
                 solo_count += 1
                 interlude = _build_instrumental_section(
                     sec_id=f"inst-break-{solo_count}",
-                    name="Instrumental / Solo" if solo_count == 1 else f"Instrumental {solo_count}",
+                    name="Instrumental / Solo"
+                    if solo_count == 1
+                    else f"Instrumental {solo_count}",
                     start_ms=prev_end,
                     end_ms=sec.startMs,
                     events=events,
@@ -260,7 +319,7 @@ def align_lyrics_and_chords(
         output.append(sec)
 
     last_vocal_end = shifted_sections[-1].endMs
-    final_ms = max(song_duration_ms, events[-1].endMs)
+    final_ms = min(3_600_000, max(bounded_dur_ms, events[-1].endMs))
     if final_ms - last_vocal_end >= INSTRUMENTAL_GAP_THRESHOLD_MS + 1500:
         outro_sec = _build_instrumental_section(
             sec_id="inst-outro",
