@@ -131,13 +131,17 @@ def _anchor_chords_to_line(
             # Snap to the start of a visual word (don't attach mid-word on syllable #2 if syllable #1 didn't end with space)
             while best_w > 0 and not line.words[best_w - 1].text.endswith((" ", "\t", "-")):
                 best_w -= 1
-            if anchors and anchors[-1].wordIndex == best_w and best_w + 1 < len(line.words):
-                # Advance to next whole-word boundary if available
-                cand = best_w + 1
-                while cand < len(line.words) and not line.words[cand - 1].text.endswith((" ", "\t", "-")):
-                    cand += 1
-                if cand < len(line.words):
-                    best_w = cand
+            if anchors and anchors[-1].wordIndex is not None:
+                prev_w = anchors[-1].wordIndex
+                if best_w < prev_w:
+                    best_w = prev_w
+                if best_w == prev_w and best_w + 1 < len(line.words):
+                    # Advance to next whole-word boundary if available so rapid chords stay ordered left-to-right
+                    cand = best_w + 1
+                    while cand < len(line.words) and not line.words[cand - 1].text.endswith((" ", "\t", "-")):
+                        cand += 1
+                    if cand < len(line.words):
+                        best_w = cand
             word_idx = best_w
 
         if ev.startMs <= line.startMs + 120 and idx == 0:
@@ -321,9 +325,14 @@ def align_lyrics_and_chords(
     last_vocal_end = shifted_sections[-1].endMs
     final_ms = min(3_600_000, max(bounded_dur_ms, events[-1].endMs))
     if final_ms - last_vocal_end >= INSTRUMENTAL_GAP_THRESHOLD_MS + 1500:
+        outro_title = (
+            "Instrumental Outro"
+            if shifted_sections[-1].name.strip().lower().startswith("outro")
+            else "Outro"
+        )
         outro_sec = _build_instrumental_section(
             sec_id="inst-outro",
-            name="Outro",
+            name=outro_title,
             start_ms=last_vocal_end,
             end_ms=final_ms,
             events=events,

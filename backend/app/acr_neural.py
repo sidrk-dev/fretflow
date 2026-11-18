@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
 import threading
 import urllib.request
 from pathlib import Path
@@ -23,6 +25,7 @@ CHECKPOINT_PATH = Path(__file__).resolve().parent.parent / "models" / "btc_model
 CHECKPOINT_URL = (
     "https://raw.githubusercontent.com/ptnghia-j/ChordMini/main/checkpoints/btc_model_best.pth"
 )
+CHECKPOINT_SHA256 = "e0a12ca6d881f81e01dfb459b4836ec7dac8d8f87b0170a412b5807256b3a1fc"
 
 
 def _gen_bias_mask(max_length: int) -> torch.Tensor:
@@ -330,13 +333,31 @@ _bundle: Optional[_NeuralChordBundle] = None
 _bundle_lock = threading.Lock()
 
 
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _ensure_checkpoint_file() -> Path:
     CHECKPOINT_PATH.parent.mkdir(parents=True, exist_ok=True)
     if CHECKPOINT_PATH.is_file() and CHECKPOINT_PATH.stat().st_size > 1_000_000:
-        return CHECKPOINT_PATH
+        if _sha256_file(CHECKPOINT_PATH) == CHECKPOINT_SHA256:
+            return CHECKPOINT_PATH
     tmp_path = CHECKPOINT_PATH.with_suffix(".pth.tmp")
-    urllib.request.urlretrieve(CHECKPOINT_URL, str(tmp_path))
-    tmp_path.replace(CHECKPOINT_PATH)
+    try:
+        req = urllib.request.Request(CHECKPOINT_URL, headers={"User-Agent": "FretFlow/1.0"})
+        with urllib.request.urlopen(req, timeout=60) as resp, tmp_path.open("wb") as out:
+            shutil.copyfileobj(resp, out)
+        digest = _sha256_file(tmp_path)
+        if digest != CHECKPOINT_SHA256:
+            raise RuntimeError(f"BTC checkpoint SHA-256 mismatch: {digest}")
+        tmp_path.replace(CHECKPOINT_PATH)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
     return CHECKPOINT_PATH
 
 

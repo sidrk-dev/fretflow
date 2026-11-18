@@ -2,6 +2,7 @@ export interface GuitarTransformSettings {
   capo: number;
   transpose: number;
   simplify: boolean;
+  leftHanded?: boolean;
 }
 
 export interface TransformedChord {

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { GuitarTransformSettings } from '../lib/musicTransposer';
 import { transformChord } from '../lib/musicTransposer';
 import type { ChordEvent } from '../types/music';
@@ -25,6 +25,23 @@ export const BeatRunway: React.FC<BeatRunwayProps> = ({
   settings,
   onSeekMs,
 }) => {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const [trackWidthPx, setTrackWidthPx] = useState<number>(640);
+
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const update = () => {
+      if (el.clientWidth > 0) setTrackWidthPx(el.clientWidth);
+    };
+    update();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(update);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+  }, []);
+
   const beatInBar = useMemo(() => {
     if (!beatsMs.length) {
       const beatDur = 60000 / Math.max(60, bpm || 120);
@@ -67,7 +84,7 @@ export const BeatRunway: React.FC<BeatRunwayProps> = ({
         </div>
       </div>
 
-      <div className="runway-track">
+      <div className="runway-track" ref={trackRef}>
         <div
           className="runway-playhead"
           style={{ left: `${PLAYHEAD_PCT}%` }}
@@ -83,10 +100,13 @@ export const BeatRunway: React.FC<BeatRunwayProps> = ({
           const widthPct = Math.max(0.8, ((cappedEndMs - ev.startMs) / TOTAL_SPAN_MS) * 100);
           const isCurrent = currentTimeMs >= ev.startMs && currentTimeMs < cappedEndMs;
 
-          // Keep the chord label pinned just to the right of the playhead while active so the line never cuts through text
-          const playheadOffsetPct = isCurrent
-            ? Math.max(0, PLAYHEAD_PCT - leftPct)
-            : 0;
+          const playheadOffsetPct = isCurrent ? Math.max(0, PLAYHEAD_PCT - leftPct) : 0;
+          const pillWidthPx = Math.max(0, (widthPct / 100) * trackWidthPx - 3);
+          const playheadOffsetPx = (playheadOffsetPct / 100) * trackWidthPx;
+          const availableTextPx =
+            playheadOffsetPct > 0 ? pillWidthPx - playheadOffsetPx - 12 : pillWidthPx - 10;
+          const minNeededPx = Math.max(10, tx.label.length * 6.8);
+          const hideLabel = availableTextPx < minNeededPx;
 
           return (
             <button
@@ -97,18 +117,23 @@ export const BeatRunway: React.FC<BeatRunwayProps> = ({
                 left: `${leftPct}%`,
                 width: `calc(${widthPct}% - 3px)`,
               }}
+              title={tx.label}
               onClick={() => onSeekMs(ev.startMs)}
             >
-              <span
-                className="runway-pill-label"
-                style={
-                  playheadOffsetPct > 0
-                    ? { paddingLeft: `calc(${(playheadOffsetPct / widthPct) * 100}% + 6px)` }
-                    : undefined
-                }
-              >
-                {tx.label}
-              </span>
+              {!hideLabel && (
+                <span
+                  className="runway-pill-label"
+                  style={
+                    playheadOffsetPct > 0
+                      ? {
+                          paddingLeft: `calc(${(playheadOffsetPct / widthPct) * 100}% + 8px)`,
+                        }
+                      : undefined
+                  }
+                >
+                  {tx.label}
+                </span>
+              )}
             </button>
           );
         })}

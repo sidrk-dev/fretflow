@@ -92,7 +92,8 @@ export const PracticeBar: React.FC<PracticeBarProps> = ({
     onUpdateManualOffset(Math.round(desiredManual));
   };
 
-  const totalOffsetSec = ((autoOffsetMs + manualOffsetMs) / 1000).toFixed(2).replace(/\.?0+$/, '');
+  const totalOffsetNum = (autoOffsetMs + manualOffsetMs) / 1000;
+  const formattedOffset = `${totalOffsetNum >= 0 ? '+' : '-'}${Math.abs(totalOffsetNum).toFixed(2)}s`;
 
   return (
     <footer className="practice-bar" aria-label="Playback and practice controls">
@@ -209,7 +210,7 @@ export const PracticeBar: React.FC<PracticeBarProps> = ({
                   : 'Adjust lyric sync timing'
               }
             >
-              Sync {Number(totalOffsetSec) >= 0 ? `+${totalOffsetSec}s` : `${totalOffsetSec}s`}
+              Sync {formattedOffset}
             </span>
             <button
               type="button"
@@ -238,16 +239,15 @@ export const PracticeBar: React.FC<PracticeBarProps> = ({
                 <span>Tap 1st Word</span>
               </button>
             )}
-            {manualOffsetMs !== 0 && (
-              <button
-                type="button"
-                className="nudge-reset-btn"
-                onClick={() => onUpdateManualOffset(0)}
-                title="Reset manual sync offset"
-              >
-                Reset
-              </button>
-            )}
+            <button
+              type="button"
+              className="nudge-reset-btn"
+              disabled={manualOffsetMs === 0}
+              onClick={() => onUpdateManualOffset(0)}
+              title="Reset manual sync offset"
+            >
+              Reset
+            </button>
           </div>
         )}
       </div>

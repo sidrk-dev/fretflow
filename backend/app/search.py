@@ -157,7 +157,10 @@ def _search_ytmusic_sync(query: str, limit: int = 8) -> list[SearchResultItem]:
         except Exception:
             continue
 
+        added_for_filter = 0
         for entry in raw_list:
+            if added_for_filter >= limit:
+                break
             vid = entry.get("videoId")
             if not vid or not YOUTUBE_ID_RE.fullmatch(vid) or vid in seen_ids:
                 continue
@@ -202,6 +205,7 @@ def _search_ytmusic_sync(query: str, limit: int = 8) -> list[SearchResultItem]:
                     viewsText=str(entry.get("views") or ""),
                 )
             )
+            added_for_filter += 1
     return items
 
 
@@ -299,7 +303,7 @@ async def search_songs_and_videos(query: str) -> list[SearchResultItem]:
                     seen.add(item.videoId)
                     merged.append(item)
 
-    return merged[:16]
+    return merged[:18]
 
 
 async def resolve_video_metadata(video_id: str) -> Optional[SearchResultItem]:

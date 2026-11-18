@@ -27,7 +27,7 @@ from app.lyrics import (
     parse_lrclib_yaml,
 )
 from app.main import app
-from app.schemas import ChordEvent, SkipSegment
+from app.schemas import ChordEvent, ChordsPayload, SkipSegment
 from app.search import YOUTUBE_URL_ID_RE, clean_track_metadata, search_songs_and_videos
 from app.sponsorblock import fetch_sponsorblock_offsets, merge_skip_segments
 
@@ -233,18 +233,50 @@ def test_dual_mode_acr_and_whole_word_syllable_anchoring():
     assert len({ev.rootPc for ev in neural_payload.events} & {0, 7, 9, 5}) >= 3
 
     # Ensure chord occurring mid-word on syllable 2 ("wall") snaps to syllable 1 ("wonder")
-    syllabic_ttml = """<tt xmlns="http://www.w3.org/ns/ttml"><body><div>
-      <p begin="5.0" end="9.0">
-        <span begin="5.0" end="6.0">You're my </span>
-        <span begin="6.0" end="6.4">wonder</span><span begin="6.4" end="8.5">wall</span>
-      </p>
-    </div></body></tt>"""
+    syllabic_ttml = """<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal"><body>
+      <div itunes:songPart="Outro">
+        <p begin="5.0" end="9.0">
+          <span begin="5.0" end="6.0">You're my </span>
+          <span begin="6.0" end="6.4">wonder</span><span begin="6.4" end="8.5">wall</span>
+        </p>
+      </div>
+    </body></tt>"""
     lyr = parse_betterlyrics_ttml(syllabic_ttml)
-    aligned = align_lyrics_and_chords(lyr, neural_payload, total_offset_ms=0, song_duration_ms=12_000)
+    aligned = align_lyrics_and_chords(lyr, neural_payload, total_offset_ms=0, song_duration_ms=22_000)
     lyric_sec = next(s for s in aligned if s.kind == "lyrics")
     for ch in lyric_sec.lines[0].chords:
         # Word index 2 is "wall" (preceded by "wonder" without trailing space) -> must snap to 1 ("wonder") or 0!
         assert ch.wordIndex != 2
+
+    # Trailing instrumental section after an "Outro" vocal section must be named "Instrumental Outro" (never duplicate "Outro")
+    section_names = [s.name for s in aligned]
+    assert section_names.count("Outro") <= 1
+
+    # Rapid 3-chord change over a single sustained word ("Feels ") must produce strictly monotonic wordIndex order
+    rapid_ttml = """<tt xmlns="http://www.w3.org/ns/ttml"><body><div>
+      <p begin="52.88" end="55.00">
+        <span begin="52.88" end="53.70">Feels </span>
+        <span begin="53.70" end="54.10">the </span>
+        <span begin="54.10" end="55.00">way</span>
+      </p>
+    </div></body></tt>"""
+    rapid_chords = ChordsPayload(
+        engine="neural_btc_170",
+        bpm=118.0,
+        detectedKey="F# Minor",
+        recommendedCapo=2,
+        events=[
+            ChordEvent(startMs=51_450, endMs=53_030, harte="E:maj", display="E", rootPc=4, quality="maj", confidence=0.9),
+            ChordEvent(startMs=53_030, endMs=53_660, harte="A:maj", display="A", rootPc=9, quality="maj", confidence=0.9),
+            ChordEvent(startMs=53_660, endMs=55_200, harte="F#:min7", display="F#m7", rootPc=6, quality="min7", confidence=0.9),
+        ],
+    )
+    rapid_aligned = align_lyrics_and_chords(parse_betterlyrics_ttml(rapid_ttml), rapid_chords, total_offset_ms=0, song_duration_ms=60_000)
+    rapid_lyric_sec = next(s for s in rapid_aligned if s.kind == "lyrics")
+    rapid_anchors = rapid_lyric_sec.lines[0].chords
+    word_indices = [a.wordIndex for a in rapid_anchors if a.wordIndex is not None]
+    assert word_indices == sorted(word_indices)
+    assert [a.display for a in rapid_anchors] == ["E", "A", "F#m7"]
 
 
 def test_api_security_and_http_range_compliance():
@@ -292,6 +324,12 @@ async def test_live_search_11char_and_sponsorblock():
     # 11-char band name ("Soundgarden") must NOT crash or get mistaken for a videoId
     sg_results = await search_songs_and_videos("Soundgarden")
     assert len(sg_results) >= 3
+
+    # General song query ("Creep Radiohead") must populate both Official Audio ("studio") and Music Videos ("video")
+    creep_results = await search_songs_and_videos("Creep Radiohead")
+    creep_types = {r.resultType for r in creep_results}
+    assert "studio" in creep_types
+    assert "video" in creep_types
 
     # Deleted/nonexistent YouTube URL must return [] cleanly instead of HTTP 500
     dead_results = await search_songs_and_videos("https://www.youtube.com/watch?v=00000000000")

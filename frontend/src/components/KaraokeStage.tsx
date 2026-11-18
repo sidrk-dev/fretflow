@@ -435,8 +435,12 @@ export const KaraokeStage: React.FC<KaraokeStageProps> = ({
                                         <span
                                           key={wi}
                                           className={`karaoke-word ${
-                                            fillPct > 0 && fillPct < 100 ? 'word-singing' : ''
-                                          } ${fillPct >= 100 ? 'word-sung' : ''}`}
+                                            fillPct <= 0
+                                              ? 'word-upcoming'
+                                              : fillPct < 100
+                                                ? 'word-singing'
+                                                : 'word-sung'
+                                          }`}
                                           style={
                                             { '--fill-pct': `${fillPct}%` } as React.CSSProperties
                                           }

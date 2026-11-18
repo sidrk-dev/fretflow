@@ -9,6 +9,7 @@ interface FretboardSvgProps {
   chordLabel: string;
   voicing: GuitarVoicing;
   capoFret: number;
+  leftHanded?: boolean;
   highlight?: boolean;
   compact?: boolean;
   onStrum?: () => void;
@@ -20,6 +21,7 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
   chordLabel,
   voicing,
   capoFret,
+  leftHanded = false,
   highlight = false,
   compact = false,
   onStrum,
@@ -44,6 +46,8 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
   const gridH = height - padTop - padBottom;
   const stringStep = gridW / (numStrings - 1);
   const fretStep = gridH / numFrets;
+  const xForString = (si: number) =>
+    padLeft + (leftHanded ? numStrings - 1 - si : si) * stringStep;
 
   return (
     <div
@@ -104,32 +108,36 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
           />
         ))}
 
-        {Array.from({ length: numStrings }).map((_, si) => (
-          <g key={`s-${si}`}>
-            <line
-              x1={padLeft + si * stringStep}
-              y1={padTop}
-              x2={padLeft + si * stringStep}
-              y2={padTop + gridH}
-              stroke="rgba(226, 232, 240, 0.52)"
-              strokeWidth={2.2 - si * 0.24}
-            />
-            <text
-              x={padLeft + si * stringStep}
-              y={height - 4}
-              textAnchor="middle"
-              className="string-label-text"
-            >
-              {STRING_NAMES[si]}
-            </text>
-          </g>
-        ))}
+        {Array.from({ length: numStrings }).map((_, di) => {
+          const origSi = leftHanded ? numStrings - 1 - di : di;
+          const cx = padLeft + di * stringStep;
+          return (
+            <g key={`s-${di}`}>
+              <line
+                x1={cx}
+                y1={padTop}
+                x2={cx}
+                y2={padTop + gridH}
+                stroke="rgba(226, 232, 240, 0.52)"
+                strokeWidth={2.2 - origSi * 0.24}
+              />
+              <text
+                x={cx}
+                y={height - 4}
+                textAnchor="middle"
+                className="string-label-text"
+              >
+                {STRING_NAMES[origSi]}
+              </text>
+            </g>
+          );
+        })}
 
         {voicing.barres?.map((b, bi) => {
           const relFret = b.fret - baseFret + 1;
           if (relFret < 1 || relFret > numFrets) return null;
-          const x1 = padLeft + b.fromString * stringStep;
-          const x2 = padLeft + b.toString * stringStep;
+          const x1 = xForString(b.fromString);
+          const x2 = xForString(b.toString);
           const cy = padTop + (relFret - 0.5) * fretStep;
           return (
             <line
@@ -147,7 +155,7 @@ export const FretboardSvg: React.FC<FretboardSvgProps> = ({
         })}
 
         {voicing.frets.map((fret, si) => {
-          const cx = padLeft + si * stringStep;
+          const cx = xForString(si);
           if (fret < 0) {
             return (
               <text key={`m-${si}`} x={cx} y={padTop - 9} textAnchor="middle" className="mute-x">
@@ -272,6 +280,7 @@ export const FretboardDeck: React.FC<FretboardDeckProps> = ({
           chordLabel={tx.label}
           voicing={activeVoicing}
           capoFret={settings.capo}
+          leftHanded={Boolean(settings.leftHanded)}
           highlight={isPrimary}
           compact={!isPrimary}
           onStrum={() => strumGuitarVoicing(activeVoicing, settings.capo)}
@@ -317,7 +326,12 @@ export const FretboardDeck: React.FC<FretboardDeckProps> = ({
       <div id="all-song-chords-popover" popover="auto" className="chords-dictionary-popover">
         <div className="popover-header">
           <div>
-            <h3>Song Chord Shapes {settings.capo > 0 ? `(Capo ${settings.capo})` : ''}</h3>
+            <h3>
+              Song Chord Shapes{' '}
+              {settings.capo > 0 && (
+                <span style={{ whiteSpace: 'nowrap' }}>(Capo {settings.capo})</span>
+              )}
+            </h3>
             <p>Click any diagram to hear how the chord sounds on guitar.</p>
           </div>
           <button
@@ -338,6 +352,7 @@ export const FretboardDeck: React.FC<FretboardDeckProps> = ({
                 chordLabel={item.label}
                 voicing={v}
                 capoFret={settings.capo}
+                leftHanded={Boolean(settings.leftHanded)}
                 compact
                 onStrum={() => strumGuitarVoicing(v, settings.capo)}
               />

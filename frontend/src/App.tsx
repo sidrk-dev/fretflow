@@ -7,7 +7,7 @@ import { KaraokeStage } from './components/KaraokeStage';
 import { PracticeBar } from './components/PracticeBar';
 import { type LoopRange, usePlaybackClock } from './hooks/usePlaybackClock';
 import { useSongSession } from './hooks/useSongSession';
-import type { GuitarTransformSettings } from './lib/musicTransposer';
+import { transformChord, type GuitarTransformSettings } from './lib/musicTransposer';
 import type { SearchResultItem, SongSection } from './types/music';
 
 export const App: React.FC = () => {
@@ -17,6 +17,7 @@ export const App: React.FC = () => {
     capo: 0,
     transpose: 0,
     simplify: false,
+    leftHanded: false,
   });
 
   const appliedCapoVideoRef = useRef<string | null>(null);
@@ -132,6 +133,16 @@ export const App: React.FC = () => {
 
   const effectiveDurationMs = durationMs || (session?.durationSec ?? 0) * 1000;
 
+  const transformedUniqueChordCount = useMemo(() => {
+    const evs = session?.chords?.events ?? [];
+    if (!evs.length) return session?.chords?.uniqueChords.length ?? 0;
+    const seen = new Set<string>();
+    for (const ev of evs) {
+      seen.add(transformChord(ev.rootPc, ev.quality, ev.bassPc, settings).label);
+    }
+    return seen.size;
+  }, [session?.chords?.events, session?.chords?.uniqueChords.length, settings]);
+
   return (
     <div className="app-shell">
       <HeaderSearchBar
@@ -153,7 +164,7 @@ export const App: React.FC = () => {
                   recommendedCapo={session.chords?.recommendedCapo ?? 0}
                   detectedKey={session.chords?.detectedKey ?? ''}
                   lyricsSource={session.lyrics?.source ?? null}
-                  uniqueChordCount={session.chords?.uniqueChords.length ?? 0}
+                  uniqueChordCount={transformedUniqueChordCount}
                 />
                 <BeatRunway
                   currentTimeMs={currentTimeMs}

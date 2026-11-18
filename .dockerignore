@@ -1,7 +1,13 @@
 .git
+.github
+.env*
+*.log
+*.tsbuildinfo
+**/__pycache__
+*.pyc
 backend/.venv
 backend/cache
-backend/__pycache__
+backend/models
 backend/.pytest_cache
 frontend/node_modules
 frontend/dist

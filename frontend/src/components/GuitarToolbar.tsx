@@ -1,5 +1,5 @@
 import React from 'react';
-import { Grid2X2, Sparkles, Wand2 } from 'lucide-react';
+import { FlipHorizontal2, Grid2X2, Sparkles, Wand2 } from 'lucide-react';
 import type { GuitarTransformSettings } from '../lib/musicTransposer';
 import type { CapoOption, LyricsSource } from '../types/music';
 
@@ -117,11 +117,24 @@ export const GuitarToolbar: React.FC<GuitarToolbarProps> = ({
         <button
           type="button"
           className={`simplify-toggle-btn ${settings.simplify ? 'active' : ''}`}
+          aria-pressed={settings.simplify}
           onClick={() => onChangeSettings({ ...settings, simplify: !settings.simplify })}
           title="Convert extended 7th/sus/slash chords into beginner-friendly Major & Minor triads"
         >
           <Sparkles size={13} />
           <span>Simplify</span>
+        </button>
+
+        <button
+          type="button"
+          className={`lefty-toggle-btn ${settings.leftHanded ? 'active' : ''}`}
+          aria-label="Left-handed fretboard mirror"
+          aria-pressed={Boolean(settings.leftHanded)}
+          onClick={() => onChangeSettings({ ...settings, leftHanded: !settings.leftHanded })}
+          title="Mirror chord diagrams horizontally for left-handed guitarists"
+        >
+          <FlipHorizontal2 size={13} />
+          <span>Lefty</span>
         </button>
 
         {uniqueChordCount > 0 && (

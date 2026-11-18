@@ -10,6 +10,16 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+if [ ! -x "$ROOT_DIR/backend/.venv/bin/uvicorn" ]; then
+  echo "📦 Installing Python backend dependencies with uv..."
+  (cd "$ROOT_DIR/backend" && uv sync)
+fi
+
+if [ ! -d "$ROOT_DIR/frontend/node_modules" ]; then
+  echo "📦 Installing Frontend dependencies with pnpm..."
+  (cd "$ROOT_DIR/frontend" && pnpm install)
+fi
+
 echo "🎸 Starting FretFlow Backend on http://127.0.0.1:8000 ..."
 (
   cd "$ROOT_DIR/backend"
@@ -17,10 +27,10 @@ echo "🎸 Starting FretFlow Backend on http://127.0.0.1:8000 ..."
 ) &
 BACKEND_PID=$!
 
-echo "🎤 Starting FretFlow Studio UI on http://localhost:5173 ..."
+echo "🎤 Starting FretFlow Studio UI on http://127.0.0.1:5173 (http://localhost:5173) ..."
 (
   cd "$ROOT_DIR/frontend"
-  exec pnpm dev --host 127.0.0.1 --port 5173
+  exec pnpm dev --host 127.0.0.1
 ) &
 FRONTEND_PID=$!
 

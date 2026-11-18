@@ -81,7 +81,7 @@ _allowed_origins = [
     o.strip()
     for o in os.getenv(
         "CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000",
     ).split(",")
     if o.strip()
 ]
@@ -494,13 +494,20 @@ _FRONTEND_DIST = os.path.abspath(
 if os.path.isdir(_FRONTEND_DIST):
     from fastapi.staticfiles import StaticFiles
 
+    class _ImmutableStaticFiles(StaticFiles):
+        async def get_response(self, path: str, scope):  # type: ignore[override]
+            resp = await super().get_response(path, scope)
+            if resp.status_code == 200:
+                resp.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+            return resp
+
     _assets_dir = os.path.join(_FRONTEND_DIST, "assets")
     if os.path.isdir(_assets_dir):
-        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+        app.mount("/assets", _ImmutableStaticFiles(directory=_assets_dir), name="assets")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     async def serve_spa(full_path: str) -> FileResponse:
-        if full_path.startswith("api/"):
+        if full_path == "api" or full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not Found")
         candidate = os.path.realpath(os.path.join(_FRONTEND_DIST, full_path))
         if (
